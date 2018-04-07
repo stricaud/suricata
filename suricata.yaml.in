@@ -1122,12 +1122,13 @@ legacy:
 ##
 
 # Set the order of alerts based on actions
-# The default order is pass, drop, reject, alert
+# The default order is pass, drop, reject, alert, response
 # action-order:
 #   - pass
 #   - drop
 #   - reject
 #   - alert
+#   - response
 
 # IP Reputation
 #reputation-categories-file: @e_sysconfdir@iprep/categories.txt

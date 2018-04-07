@@ -37,7 +37,7 @@
 #include "util-debug.h"
 
 /* Default order: */
-uint8_t action_order_sigs[4] = {ACTION_PASS, ACTION_DROP, ACTION_REJECT, ACTION_ALERT};
+uint8_t action_order_sigs[NUMBER_OF_ACTIONS] = {ACTION_PASS, ACTION_DROP, ACTION_REJECT, ACTION_ALERT, ACTION_RESPONSE};
 /* This order can be changed from config */
 
 /**
@@ -47,7 +47,7 @@ uint8_t action_order_sigs[4] = {ACTION_PASS, ACTION_DROP, ACTION_REJECT, ACTION_
  *        so action_order_sigs[0] has to be inspected first.
  *        This function is called from detect-engine-sigorder
  * \param action can be one of ACTION_PASS, ACTION_DROP,
- *        ACTION_REJECT or ACTION_ALERT
+ *        ACTION_REJECT, ACTION_ALERT or ACTION_RESPONSE
  * \retval uint8_t the priority (order of this actions)
  */
 uint8_t ActionOrderVal(uint8_t action)
@@ -59,7 +59,7 @@ uint8_t ActionOrderVal(uint8_t action)
         action = ACTION_REJECT;
     }
     uint8_t i = 0;
-    for (; i < 4; i++) {
+    for (; i < NUMBER_OF_ACTIONS; i++) {
         if (action_order_sigs[i] == action)
             return i;
     }
@@ -99,7 +99,7 @@ int ActionInitConfig()
 {
     uint8_t actions_used = 0;
     uint8_t action_flag = 0;
-    uint8_t actions_config[4] = {0, 0, 0, 0};
+    uint8_t actions_config[NUMBER_OF_ACTIONS] = {0, 0, 0, 0, 0};
     int order = 0;
 
     ConfNode *action_order;
@@ -117,7 +117,7 @@ int ActionInitConfig()
             action_flag = ActionAsciiToFlag(action->val);
             if (action_flag == 0) {
                 SCLogError(SC_ERR_ACTION_ORDER, "action-order, invalid action: \"%s\". Please, use"
-                       " \"pass\",\"drop\",\"alert\",\"reject\". You have"
+                       " \"pass\",\"drop\",\"alert\",\"reject\" or \"response\". You have"
                        " to specify all of them, without quotes and without"
                        " capital letters", action->val);
                 goto error;
@@ -125,16 +125,16 @@ int ActionInitConfig()
 
             if (actions_used & action_flag) {
                 SCLogError(SC_ERR_ACTION_ORDER, "action-order, action already set: \"%s\". Please,"
-                       " use \"pass\",\"drop\",\"alert\",\"reject\". You"
+                       " use \"pass\",\"drop\",\"alert\",\"reject\" or \"response\". You"
                        " have to specify all of them, without quotes and"
                        " without capital letters", action->val);
                 goto error;
             }
 
-            if (order >= 4) {
+            if (order >= NUMBER_OF_ACTIONS) {
                 SCLogError(SC_ERR_ACTION_ORDER, "action-order, you have already specified all the "
                        "possible actions plus \"%s\". Please, use \"pass\","
-                       "\"drop\",\"alert\",\"reject\". You have to specify"
+                       "\"drop\",\"alert\",\"reject\" or \"response\". You have to specify"
                        " all of them, without quotes and without capital"
                        " letters", action->val);
                 goto error;
@@ -143,16 +143,16 @@ int ActionInitConfig()
             actions_config[order++] = action_flag;
         }
     }
-    if (order < 4) {
+    if (order < NUMBER_OF_ACTIONS) {
         SCLogError(SC_ERR_ACTION_ORDER, "action-order, the config didn't specify all of the "
                "actions. Please, use \"pass\",\"drop\",\"alert\","
-               "\"reject\". You have to specify all of them, without"
+               "\"reject\" or \"response\". You have to specify all of them, without"
                " quotes and without capital letters");
         goto error;
     }
 
     /* Now, it's a valid config. Override the default preset */
-    for (order = 0; order < 4; order++) {
+    for (order = 0; order < NUMBER_OF_ACTIONS; order++) {
         action_order_sigs[order] = actions_config[order];
     }
 
@@ -297,7 +297,8 @@ action-order:\n";
     if (action_order_sigs[0] != ACTION_PASS ||
         action_order_sigs[1] != ACTION_DROP ||
         action_order_sigs[2] != ACTION_REJECT ||
-        action_order_sigs[3] != ACTION_ALERT)
+        action_order_sigs[3] != ACTION_ALERT ||
+        action_order_sigs[4] != ACTION_RESPONSE)
     {
         res = 0;
     }
@@ -308,6 +309,7 @@ action-order:\n";
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -337,7 +339,8 @@ action-order:\n\
     if (action_order_sigs[0] != ACTION_PASS ||
         action_order_sigs[1] != ACTION_DROP ||
         action_order_sigs[2] != ACTION_REJECT ||
-        action_order_sigs[3] != ACTION_ALERT)
+        action_order_sigs[3] != ACTION_ALERT ||
+        action_order_sigs[4] != ACTION_RESPONSE)
     {
         res = 0;
     }
@@ -348,6 +351,7 @@ action-order:\n\
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -371,10 +375,11 @@ action-order:\n\
     ConfYamlLoadString(config, strlen(config));
 
     ActionInitConfig();
-    if (action_order_sigs[0] != ACTION_ALERT ||
-        action_order_sigs[1] != ACTION_DROP ||
-        action_order_sigs[2] != ACTION_REJECT ||
-        action_order_sigs[3] != ACTION_PASS)
+    if (action_order_sigs[0] != ACTION_RESPONSE ||
+	action_order_sigs[1] != ACTION_ALERT ||
+        action_order_sigs[2] != ACTION_DROP ||
+        action_order_sigs[3] != ACTION_REJECT ||
+        action_order_sigs[4] != ACTION_PASS)
     {
         res = 0;
     }
@@ -385,6 +390,7 @@ action-order:\n\
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -400,6 +406,7 @@ static int UtilActionTest07(void)
 action-order:\n\
   - pass\n\
   - alert\n\
+  - response\n\
   - drop\n\
   - reject\n";
 
@@ -410,8 +417,9 @@ action-order:\n\
     ActionInitConfig();
     if (action_order_sigs[0] != ACTION_PASS ||
         action_order_sigs[1] != ACTION_ALERT ||
-        action_order_sigs[2] != ACTION_DROP ||
-        action_order_sigs[3] != ACTION_REJECT)
+        action_order_sigs[2] != ACTION_RESPONSE ||
+        action_order_sigs[3] != ACTION_DROP ||
+        action_order_sigs[4] != ACTION_REJECT)
     {
         res = 0;
     }
@@ -422,6 +430,7 @@ action-order:\n\
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -505,6 +514,7 @@ static int UtilActionTest09(void)
     action_order_sigs[1] = ACTION_PASS;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -563,6 +573,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -650,6 +661,7 @@ static int UtilActionTest11(void)
     action_order_sigs[1] = ACTION_PASS;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -708,6 +720,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -789,6 +802,7 @@ static int UtilActionTest13(void)
     action_order_sigs[1] = ACTION_PASS;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -845,6 +859,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -861,9 +876,10 @@ static int UtilActionTest14(void)
     Packet *p[3];
 
     action_order_sigs[0] = ACTION_DROP;
-    action_order_sigs[1] = ACTION_ALERT;
-    action_order_sigs[2] = ACTION_REJECT;
-    action_order_sigs[3] = ACTION_PASS;
+    action_order_sigs[1] = ACTION_RESPONSE;
+    action_order_sigs[2] = ACTION_ALERT;
+    action_order_sigs[3] = ACTION_REJECT;
+    action_order_sigs[4] = ACTION_PASS;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -921,6 +937,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     return res;
 }
 
@@ -1130,6 +1147,7 @@ static int UtilActionTest18(void)
     action_order_sigs[1] = ACTION_PASS;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -1187,6 +1205,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     return res;
 }
@@ -1205,6 +1224,7 @@ static int UtilActionTest19(void)
     action_order_sigs[1] = ACTION_PASS;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -1262,6 +1282,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     return res;
 }
@@ -1280,6 +1301,7 @@ static int UtilActionTest20(void)
     action_order_sigs[1] = ACTION_PASS;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -1346,9 +1368,10 @@ static int UtilActionTest21(void)
     Packet *p[3];
 
     action_order_sigs[0] = ACTION_DROP;
-    action_order_sigs[1] = ACTION_ALERT;
-    action_order_sigs[2] = ACTION_REJECT;
-    action_order_sigs[3] = ACTION_PASS;
+    action_order_sigs[1] = ACTION_RESPONSE;
+    action_order_sigs[2] = ACTION_ALERT;
+    action_order_sigs[3] = ACTION_REJECT;
+    action_order_sigs[4] = ACTION_PASS;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -1406,6 +1429,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     return res;
 }
@@ -1421,9 +1445,10 @@ static int UtilActionTest22(void)
     Packet *p[3];
 
     action_order_sigs[0] = ACTION_DROP;
-    action_order_sigs[1] = ACTION_ALERT;
-    action_order_sigs[2] = ACTION_REJECT;
-    action_order_sigs[3] = ACTION_PASS;
+    action_order_sigs[1] = ACTION_RESPONSE;
+    action_order_sigs[2] = ACTION_ALERT;
+    action_order_sigs[3] = ACTION_REJECT;
+    action_order_sigs[4] = ACTION_PASS;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -1481,6 +1506,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
     return res;
 }
@@ -1497,8 +1523,9 @@ static int UtilActionTest23(void)
 
     action_order_sigs[0] = ACTION_DROP;
     action_order_sigs[1] = ACTION_ALERT;
-    action_order_sigs[2] = ACTION_REJECT;
-    action_order_sigs[3] = ACTION_PASS;
+    action_order_sigs[2] = ACTION_RESPONSE;
+    action_order_sigs[3] = ACTION_REJECT;
+    action_order_sigs[4] = ACTION_PASS;
 
     p[0] = UTHBuildPacketReal((uint8_t *)buf, buflen, IPPROTO_TCP,
                    "192.168.1.5", "192.168.1.1",
@@ -1555,6 +1582,7 @@ cleanup:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
 
 end:
     return res;
@@ -1581,7 +1609,8 @@ static int UtilActionTest24(void)
     if (action_order_sigs[0] != ACTION_PASS ||
         action_order_sigs[1] != ACTION_DROP ||
         action_order_sigs[2] != ACTION_REJECT ||
-        action_order_sigs[3] != ACTION_ALERT) {
+        action_order_sigs[3] != ACTION_ALERT) ||
+        action_order_sigs[4] != ACTION_RESPONSE) {
         res = 0;
     }
 

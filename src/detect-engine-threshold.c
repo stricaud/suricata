@@ -301,6 +301,10 @@ static int ThresholdHandlePacketSuppress(Packet *p,
 static inline void RateFilterSetAction(Packet *p, PacketAlert *pa, uint8_t new_action)
 {
     switch (new_action) {
+        case TH_ACTION_RESPONSE:
+            PACKET_RESPONSE(p);
+            pa->flags |= PACKET_ALERT_RATE_FILTER_MODIFIED;
+            break;
         case TH_ACTION_ALERT:
             PACKET_ALERT(p);
             pa->flags |= PACKET_ALERT_RATE_FILTER_MODIFIED;

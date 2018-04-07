@@ -1599,13 +1599,14 @@ static int SCSigOrderingTest08(void)
 #ifdef HAVE_LIBNET11
     int result = 0;
     Signature *prevsig = NULL, *sig = NULL;
-    extern uint8_t action_order_sigs[4];
+    extern uint8_t action_order_sigs[NUMBER_OF_ACTIONS];
 
     /* Let's change the order. Default is pass, drop, reject, alert (pass has highest prio) */
     action_order_sigs[0] = ACTION_REJECT;
     action_order_sigs[1] = ACTION_DROP;
-    action_order_sigs[2] = ACTION_ALERT;
-    action_order_sigs[3] = ACTION_PASS;
+    action_order_sigs[2] = ACTION_RESPONSE;
+    action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_PASS;
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     if (de_ctx == NULL)
@@ -1710,6 +1711,8 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
+    
     if (de_ctx != NULL)
         DetectEngineCtxFree(de_ctx);
     return result;
@@ -1731,8 +1734,9 @@ static int SCSigOrderingTest09(void)
     /* Let's change the order. Default is pass, drop, reject, alert (pass has highest prio) */
     action_order_sigs[0] = ACTION_DROP;
     action_order_sigs[1] = ACTION_REJECT;
-    action_order_sigs[2] = ACTION_ALERT;
-    action_order_sigs[3] = ACTION_PASS;
+    action_order_sigs[2] = ACTION_RESPONSE;    
+    action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_PASS;
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     if (de_ctx == NULL)
@@ -1837,6 +1841,7 @@ end:
     action_order_sigs[1] = ACTION_REJECT;
     action_order_sigs[2] = ACTION_PASS;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     if (de_ctx != NULL)
         DetectEngineCtxFree(de_ctx);
     return result;
@@ -1855,8 +1860,9 @@ static int SCSigOrderingTest10(void)
     /* Let's change the order. Default is pass, drop, reject, alert (pass has highest prio) */
     action_order_sigs[0] = ACTION_PASS;
     action_order_sigs[1] = ACTION_ALERT;
-    action_order_sigs[2] = ACTION_DROP;
-    action_order_sigs[3] = ACTION_REJECT;
+    action_order_sigs[2] = ACTION_RESPONSE;
+    action_order_sigs[3] = ACTION_DROP;
+    action_order_sigs[4] = ACTION_REJECT;
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     if (de_ctx == NULL)
@@ -1961,6 +1967,7 @@ end:
     action_order_sigs[1] = ACTION_DROP;
     action_order_sigs[2] = ACTION_REJECT;
     action_order_sigs[3] = ACTION_ALERT;
+    action_order_sigs[4] = ACTION_RESPONSE;
     if (de_ctx != NULL)
         DetectEngineCtxFree(de_ctx);
     return result;

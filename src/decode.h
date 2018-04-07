@@ -848,6 +848,8 @@ void CaptureStatsSetup(ThreadVars *tv, CaptureStats *s);
      ((p)->action = a)); \
 } while (0)
 
+#define PACKET_RESPONSE(p) PACKET_SET_ACTION(p, ACTION_RESPONSE)
+
 #define PACKET_ALERT(p) PACKET_SET_ACTION(p, ACTION_ALERT)
 
 #define PACKET_ACCEPT(p) PACKET_SET_ACTION(p, ACTION_ACCEPT)

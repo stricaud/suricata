@@ -26,11 +26,14 @@
 
 /* Changing them as flags, so later we can have alerts
  * and drop simultaneously */
-#define ACTION_ALERT        0x01
-#define ACTION_DROP         0x02
-#define ACTION_REJECT       0x04
-#define ACTION_REJECT_DST   0x08
-#define ACTION_REJECT_BOTH  0x10
-#define ACTION_PASS         0x20
+#define NUMBER_OF_ACTIONS 5	/* REJECT* counts only for 1 */
+
+#define ACTION_RESPONSE     0x01
+#define ACTION_ALERT        0x02
+#define ACTION_DROP         0x04
+#define ACTION_REJECT       0x08
+#define ACTION_REJECT_DST   0x10
+#define ACTION_REJECT_BOTH  0x20
+#define ACTION_PASS         0x30
 
 #endif /* __ACTION_GLOBALS_H__ */

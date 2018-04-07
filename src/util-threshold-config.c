@@ -880,6 +880,8 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
                 }
 
                 /* Get the new action to take */
+                if (strcasecmp(th_new_action, "response") == 0)
+                    parsed_new_action = TH_ACTION_RESPONSE;
                 if (strcasecmp(th_new_action, "alert") == 0)
                     parsed_new_action = TH_ACTION_ALERT;
                 if (strcasecmp(th_new_action, "drop") == 0)

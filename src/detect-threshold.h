@@ -42,12 +42,13 @@
 #define TRACK_BOTH     5 /* used by rate_filter to match detections by both src and dst addresses */
 
 /* Get the new action to take */
-#define TH_ACTION_ALERT     0x01
-#define TH_ACTION_DROP      0x02
-#define TH_ACTION_PASS      0x04
-#define TH_ACTION_LOG       0x08
-#define TH_ACTION_SDROP     0x10
-#define TH_ACTION_REJECT    0x20
+#define TH_ACTION_RESPONSE  0x01
+#define TH_ACTION_ALERT     0x02
+#define TH_ACTION_DROP      0x03
+#define TH_ACTION_PASS      0x08
+#define TH_ACTION_LOG       0x10
+#define TH_ACTION_SDROP     0x20
+#define TH_ACTION_REJECT    0x30
 
 /**
  * \typedef DetectThresholdData
