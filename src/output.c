@@ -44,6 +44,7 @@
 #include "alert-unified2-alert.h"
 #include "alert-debuglog.h"
 #include "alert-prelude.h"
+#include "alert-response.h"
 #include "alert-syslog.h"
 #include "output-json-alert.h"
 #include "output-json-flow.h"
@@ -1044,6 +1045,8 @@ void OutputRegisterLoggers(void)
     AlertDebugLogRegister();
     /* prelue log */
     AlertPreludeRegister();
+    /* response system */
+    AlertResponseRegister();
     /* syslog log */
     AlertSyslogRegister();
     /* unified2 log */

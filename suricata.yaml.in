@@ -429,6 +429,10 @@ outputs:
       log-packet-content: no
       log-packet-header: yes
 
+  # If the action for rules is not "alert" but "response"
+  - alert-response:
+      enabled: yes
+
   # Stats.log contains data from various counters of the Suricata engine.
   - stats:
       enabled: yes

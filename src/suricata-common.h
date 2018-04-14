@@ -433,6 +433,7 @@ typedef enum {
     LOGGER_PCAP,
     LOGGER_JSON_METADATA,
     LOGGER_SIZE,
+    LOGGER_RESPONSE,
 } LoggerId;
 
 #include "util-optimize.h"
