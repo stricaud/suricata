@@ -25,6 +25,12 @@
 #ifndef __UTIL_PATH_H__
 #define __UTIL_PATH_H__
 
+#ifdef WIN32
+#define PATHSEP "\\"
+#else
+#define PATHSEP "/"
+#endif
+
 #ifndef HAVE_NON_POSIX_MKDIR
     #define SCMkDir(a, b) mkdir(a, b)
 #else
