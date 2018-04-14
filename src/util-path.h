@@ -25,7 +25,7 @@
 #ifndef __UTIL_PATH_H__
 #define __UTIL_PATH_H__
 
-#ifdef WIN32
+#ifdef OS_WIN32
 #define PATHSEP "\\"
 #else
 #define PATHSEP "/"
