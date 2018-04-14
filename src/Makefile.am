@@ -515,6 +515,7 @@ endif
 # default CFLAGS
 AM_CFLAGS = ${OPTIMIZATION_CFLAGS} ${GCC_CFLAGS} ${CLANG_CFLAGS}            \
     ${SECCFLAGS} ${PCAP_CFLAGS} -DLOCAL_STATE_DIR=\"$(localstatedir)\"      \
+    -DRESPONSE_PLUGINS=\"$(libdir)/suricata/response\"                      \
     -std=gnu99                                                              \
     -Wall -Wno-unused-parameter -Wmissing-prototypes -Wmissing-declarations \
     -Wstrict-prototypes -Wwrite-strings -Wbad-function-cast                 \
