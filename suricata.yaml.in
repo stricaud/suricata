@@ -49,8 +49,11 @@ vars:
 ## Step 2: select the rules to enable or disable
 ##
 
-default-rule-path: @e_sysconfdir@rules
-rule-files:
+#default-rule-path: @e_sysconfdir@rules
+default-rule-path: @e_defaultruledir@
+@suricata_update_rule_files@:
+ - suricata.rules
+@classic_rule_files@:
  - botcc.rules
  # - botcc.portgrouped.rules
  - ciarmy.rules
@@ -170,6 +173,24 @@ outputs:
 
       pcap-file: false
 
+      # HTTP X-Forwarded-For support by adding an extra field or overwriting
+      # the source or destination IP address (depending on flow direction)
+      # with the one reported in the X-Forwarded-For HTTP header. This is
+      # helpful when reviewing alerts for traffic that is being reverse
+      # or forward proxied.
+      xff:
+        enabled: no
+        # Two operation modes are available, "extra-data" and "overwrite".
+        mode: extra-data
+        # Two proxy deployments are supported, "reverse" and "forward". In
+        # a "reverse" deployment the IP address used is the last one, in a
+        # "forward" deployment the first IP address is used.
+        deployment: reverse
+        # Header name where the actual IP address will be reported, if more
+        # than one IP address is present, the last IP address will be the
+        # one taken into consideration.
+        header: X-Forwarded-For
+
       types:
         - alert:
             # payload: yes             # enable dumping payload in Base64
@@ -182,24 +203,6 @@ outputs:
             # Enable the logging of tagged packets for rules using the
             # "tag" keyword.
             tagged-packets: yes
-
-            # HTTP X-Forwarded-For support by adding an extra field or overwriting
-            # the source or destination IP address (depending on flow direction)
-            # with the one reported in the X-Forwarded-For HTTP header. This is
-            # helpful when reviewing alerts for traffic that is being reverse
-            # or forward proxied.
-            xff:
-              enabled: no
-              # Two operation modes are available, "extra-data" and "overwrite".
-              mode: extra-data
-              # Two proxy deployments are supported, "reverse" and "forward". In
-              # a "reverse" deployment the IP address used is the last one, in a
-              # "forward" deployment the first IP address is used.
-              deployment: reverse
-              # Header name where the actual IP address will be reported, if more
-              # than one IP address is present, the last IP address will be the
-              # one taken into consideration.
-              header: X-Forwarded-For
         - http:
             extended: yes     # enable this for extended logging information
             # custom allows additional http fields to be included in eve-log
@@ -403,6 +406,17 @@ outputs:
       # If set to a value will enable ring buffer mode. Will keep Maximum of "max-files" of size "limit"
       max-files: 2000
 
+      # Compression algorithm for pcap files. Possible values: none, lz4.
+      # Enabling compression is incompatible with the sguil mode. Note also
+      # that on Windows, enabling compression will *increase* disk I/O.
+      compression: none
+
+      # Further options for lz4 compression. The compression level can be set
+      # to a value between 0 and 16, where higher values result in higher
+      # compression.
+      #lz4-checksum: no
+      #lz4-level: 0
+
       mode: normal # normal, multi or sguil.
 
       # Directory to place pcap files. If not provided the default log
@@ -505,6 +519,24 @@ outputs:
       # the use of this output module as it uses the SHA256 as the
       # file naming scheme.
       #force-hash: [sha1, md5]
+      # NOTE: X-Forwarded configuration is ignored if write-fileinfo is disabled
+      # HTTP X-Forwarded-For support by adding an extra field or overwriting
+      # the source or destination IP address (depending on flow direction)
+      # with the one reported in the X-Forwarded-For HTTP header. This is
+      # helpful when reviewing alerts for traffic that is being reverse
+      # or forward proxied.
+      xff:
+        enabled: no
+        # Two operation modes are available, "extra-data" and "overwrite".
+        mode: extra-data
+        # Two proxy deployments are supported, "reverse" and "forward". In
+        # a "reverse" deployment the IP address used is the last one, in a
+        # "forward" deployment the first IP address is used.
+        deployment: reverse
+        # Header name where the actual IP address will be reported, if more
+        # than one IP address is present, the last IP address will be the
+        # one taken into consideration.
+        header: X-Forwarded-For
 
   # output module to store extracted files to disk (old style, deprecated)
   #

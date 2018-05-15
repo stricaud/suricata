@@ -399,7 +399,23 @@ void JsonFiveTuple(const Packet *p, enum OutputJsonLogDirection dir, json_t *js)
     dstip[0] = '\0';
 
     switch (dir) {
+        case LOG_DIR_PACKET:
+            if (PKT_IS_IPV4(p)) {
+                PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p),
+                        srcip, sizeof(srcip));
+                PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p),
+                        dstip, sizeof(dstip));
+            } else if (PKT_IS_IPV6(p)) {
+                PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p),
+                        srcip, sizeof(srcip));
+                PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p),
+                        dstip, sizeof(dstip));
+            }
+            sp = p->sp;
+            dp = p->dp;
+            break;
         case LOG_DIR_FLOW:
+        case LOG_DIR_FLOW_TOSERVER:
             if ((PKT_IS_TOSERVER(p))) {
                 if (PKT_IS_IPV4(p)) {
                     PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p),
@@ -430,20 +446,36 @@ void JsonFiveTuple(const Packet *p, enum OutputJsonLogDirection dir, json_t *js)
                 dp = p->sp;
             }
             break;
-        case LOG_DIR_PACKET:
-            if (PKT_IS_IPV4(p)) {
-                PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p),
-                        srcip, sizeof(srcip));
-                PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p),
-                        dstip, sizeof(dstip));
-            } else if (PKT_IS_IPV6(p)) {
-                PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p),
-                        srcip, sizeof(srcip));
-                PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p),
-                        dstip, sizeof(dstip));
+        case LOG_DIR_FLOW_TOCLIENT:
+            if ((PKT_IS_TOCLIENT(p))) {
+                if (PKT_IS_IPV4(p)) {
+                    PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p),
+                            srcip, sizeof(srcip));
+                    PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p),
+                            dstip, sizeof(dstip));
+                } else if (PKT_IS_IPV6(p)) {
+                    PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p),
+                            srcip, sizeof(srcip));
+                    PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p),
+                            dstip, sizeof(dstip));
+                }
+                sp = p->sp;
+                dp = p->dp;
+            } else {
+                if (PKT_IS_IPV4(p)) {
+                    PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p),
+                            srcip, sizeof(srcip));
+                    PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p),
+                            dstip, sizeof(dstip));
+                } else if (PKT_IS_IPV6(p)) {
+                    PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p),
+                            srcip, sizeof(srcip));
+                    PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p),
+                            dstip, sizeof(dstip));
+                }
+                sp = p->dp;
+                dp = p->sp;
             }
-            sp = p->sp;
-            dp = p->dp;
             break;
         default:
             DEBUG_VALIDATE_BUG_ON(1);
@@ -822,6 +854,15 @@ OutputInitResult OutputJsonInitCtx(ConfNode *conf)
             json_ctx->include_metadata = true;
         }
 
+        /* Do we have a global eve xff configuration? */
+        const ConfNode *xff = ConfNodeLookupChild(conf, "xff");
+        if (xff != NULL) {
+            json_ctx->xff_cfg = SCCalloc(1, sizeof(HttpXFFCfg));
+            if (likely(json_ctx->xff_cfg != NULL)) {
+                HttpXFFGetCfg(conf, json_ctx->xff_cfg);
+            }
+        }
+
         const char *pcapfile_s = ConfNodeLookupChildValue(conf, "pcap-file");
         if (pcapfile_s != NULL && ConfValIsTrue(pcapfile_s)) {
             json_ctx->file_ctx->is_pcap_offline =
@@ -847,6 +888,9 @@ static void OutputJsonDeInitCtx(OutputCtx *output_ctx)
         SCLogWarning(SC_WARN_EVENT_DROPPED,
                 "%"PRIu64" events were dropped due to slow or "
                 "disconnected socket", logfile_ctx->dropped);
+    }
+    if (json_ctx->xff_cfg != NULL) {
+        SCFree(json_ctx->xff_cfg);
     }
     LogFileFreeCtx(logfile_ctx);
     SCFree(json_ctx);

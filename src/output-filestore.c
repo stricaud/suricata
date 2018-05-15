@@ -19,6 +19,7 @@
 
 #include "app-layer-parser.h"
 #include "app-layer-htp.h"
+#include "app-layer-htp-xff.h"
 #include "app-layer-smtp.h"
 
 #include "output.h"
@@ -49,6 +50,7 @@ typedef struct OutputFilestoreCtx_ {
     char prefix[FILESTORE_PREFIX_MAX];
     char tmpdir[FILESTORE_PREFIX_MAX];
     bool fileinfo;
+    HttpXFFCfg *xff_cfg;
 } OutputFilestoreCtx;
 
 typedef struct OutputFilestoreLogThread_ {
@@ -121,7 +123,7 @@ static void OutputFilestoreUpdateFileTime(const char *src_filename,
 
 static void OutputFilestoreFinalizeFiles(ThreadVars *tv,
         const OutputFilestoreLogThread *oft, const OutputFilestoreCtx *ctx,
-        const Packet *p, File *ff) {
+        const Packet *p, File *ff, uint8_t dir) {
     /* Stringify the SHA256 which will be used in the final
      * filename. */
     char sha256string[(SHA256_LENGTH * 2) + 1];
@@ -162,7 +164,8 @@ static void OutputFilestoreFinalizeFiles(ThreadVars *tv,
         snprintf(js_metadata_filename, sizeof(js_metadata_filename),
                 "%s.%"PRIuMAX".%u.json", final_filename,
                 (uintmax_t)p->ts.tv_sec, ff->file_store_id);
-        json_t *js_fileinfo = JsonBuildFileInfoRecord(p, ff, true);
+        json_t *js_fileinfo = JsonBuildFileInfoRecord(p, ff, true, dir,
+                ctx->xff_cfg);
         if (likely(js_fileinfo != NULL)) {
             json_dump_file(js_fileinfo, js_metadata_filename, 0);
             json_decref(js_fileinfo);
@@ -173,7 +176,7 @@ static void OutputFilestoreFinalizeFiles(ThreadVars *tv,
 
 static int OutputFilestoreLogger(ThreadVars *tv, void *thread_data,
         const Packet *p, File *ff, const uint8_t *data, uint32_t data_len,
-        uint8_t flags)
+        uint8_t flags, uint8_t dir)
 {
     SCEnter();
     OutputFilestoreLogThread *aft = (OutputFilestoreLogThread *)thread_data;
@@ -255,7 +258,7 @@ static int OutputFilestoreLogger(ThreadVars *tv, void *thread_data,
             ff->fd = -1;
             SC_ATOMIC_SUB(filestore_open_file_cnt, 1);
         }
-        OutputFilestoreFinalizeFiles(tv, aft, ctx, p, ff);
+        OutputFilestoreFinalizeFiles(tv, aft, ctx, p, ff, dir);
     }
 
     return 0;
@@ -307,6 +310,9 @@ static TmEcode OutputFilestoreLogThreadDeinit(ThreadVars *t, void *data)
 static void OutputFilestoreLogDeInitCtx(OutputCtx *output_ctx)
 {
     OutputFilestoreCtx *ctx = (OutputFilestoreCtx *)output_ctx->data;
+    if (ctx->xff_cfg != NULL) {
+        SCFree(ctx->xff_cfg);
+    }
     SCFree(ctx);
     SCFree(output_ctx);
 }
@@ -403,6 +409,11 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
     }
     strlcpy(ctx->prefix, log_directory, sizeof(ctx->prefix));
     snprintf(ctx->tmpdir, sizeof(ctx->tmpdir) - 1, "%s/tmp", log_directory);
+
+    ctx->xff_cfg = SCCalloc(1, sizeof(HttpXFFCfg));
+    if (ctx->xff_cfg != NULL) {
+        HttpXFFGetCfg(conf, ctx->xff_cfg);
+    }
 
     OutputCtx *output_ctx = SCCalloc(1, sizeof(OutputCtx));
     if (unlikely(output_ctx == NULL)) {
