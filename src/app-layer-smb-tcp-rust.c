@@ -34,7 +34,7 @@
 
 static int RustSMBTCPParseRequest(Flow *f, void *state,
         AppLayerParserState *pstate, uint8_t *input, uint32_t input_len,
-        void *local_data)
+        void *local_data, const uint8_t flags)
 {
     SCLogDebug("RustSMBTCPParseRequest");
     uint16_t file_flags = FileFlowToFlags(f, STREAM_TOSERVER);
@@ -45,7 +45,7 @@ static int RustSMBTCPParseRequest(Flow *f, void *state,
         res = rs_smb_parse_request_tcp_gap(state, input_len);
     } else {
         res = rs_smb_parse_request_tcp(f, state, pstate, input, input_len,
-            local_data);
+            local_data, flags);
     }
     if (res != 1) {
         SCLogNotice("SMB request%s of %u bytes, retval %d",
@@ -56,7 +56,7 @@ static int RustSMBTCPParseRequest(Flow *f, void *state,
 
 static int RustSMBTCPParseResponse(Flow *f, void *state,
         AppLayerParserState *pstate, uint8_t *input, uint32_t input_len,
-        void *local_data)
+        void *local_data, const uint8_t flags)
 {
     SCLogDebug("RustSMBTCPParseResponse");
     uint16_t file_flags = FileFlowToFlags(f, STREAM_TOCLIENT);
@@ -68,7 +68,7 @@ static int RustSMBTCPParseResponse(Flow *f, void *state,
         res = rs_smb_parse_response_tcp_gap(state, input_len);
     } else {
         res = rs_smb_parse_response_tcp(f, state, pstate, input, input_len,
-            local_data);
+            local_data, flags);
     }
     if (res != 1) {
         SCLogNotice("SMB response%s of %u bytes, retval %d",

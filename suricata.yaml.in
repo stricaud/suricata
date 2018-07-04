@@ -110,6 +110,7 @@ default-rule-path: @e_defaultruledir@
 # - dnp3-events.rules       # available in suricata sources under rules dir
 # - ntp-events.rules       # available in suricata sources under rules dir
 # - ipsec-events.rules       # available in suricata sources under rules dir
+# - kerberos-events.rules       # available in suricata sources under rules dir
 
 classification-file: @e_sysconfdir@classification.config
 reference-config-file: @e_sysconfdir@reference.config
@@ -199,6 +200,7 @@ outputs:
             # packet: yes              # enable dumping of packet (without stream segments)
             # http-body: yes           # enable dumping of http body in Base64
             # http-body-printable: yes # enable dumping of http body in printable format
+            # metadata: no             # enable inclusion of app layer metadata with alert. Default yes
 
             # Enable the logging of tagged packets for rules using the
             # "tag" keyword.
@@ -273,6 +275,15 @@ outputs:
         @rust_config_comment@- smb
         @rust_config_comment@- tftp
         @rust_config_comment@- ikev2
+        @rust_config_comment@- krb5
+        - dhcp:
+            # DHCP logging requires Rust.
+            enabled: @rust_config_enabled@
+            # When extended mode is on, all DHCP messages are logged
+            # with full detail. When extended mode is off (the
+            # default), just enough information to map a MAC address
+            # to an IP address is logged.
+            extended: no
         - ssh
         - stats:
             totals: yes       # stats for all threads merged together
@@ -812,6 +823,8 @@ pcap-file:
 # "detection-only" enables protocol detection only (parser disabled).
 app-layer:
   protocols:
+    krb5:
+      enabled: @rust_config_enabled@
     ikev2:
       enabled: yes
     tls:
@@ -822,11 +835,20 @@ app-layer:
       # Generate JA3 fingerprint from client hello
       ja3-fingerprints: no
 
-      # Completely stop processing TLS/SSL session after the handshake
-      # completed. If bypass is enabled this will also trigger flow
-      # bypass. If disabled (the default), TLS/SSL session is still
-      # tracked for Heartbleed and other anomalies.
-      #no-reassemble: yes
+      # What to do when the encrypted communications start:
+      # - default: keep tracking TLS session, check for protocol anomalies,
+      #            inspect tls_* keywords. Disables inspection of unmodified
+      #            'content' signatures.
+      # - bypass:  stop processing this flow as much as possible. No further
+      #            TLS parsing and inspection. Offload flow bypass to kernel
+      #            or hardware if possible.
+      # - full:    keep tracking and inspection as normal. Unmodified content
+      #            keyword signatures are inspected as well.
+      #
+      # For best performance, select 'bypass'.
+      #
+      #encrypt-handling: default
+
     dcerpc:
       enabled: yes
     ftp:
@@ -1050,6 +1072,9 @@ app-layer:
 
     # Note: parser depends on experimental Rust support
     ntp:
+      enabled: @rust_config_enabled@
+
+    dhcp:
       enabled: @rust_config_enabled@
 
 # Limit for the maximum number of asn1 frames to decode (default 256)

@@ -23,7 +23,7 @@ use core::{DetectEngineState,Flow,AppLayerEventType,AppLayerDecoderEvents,AppPro
 use filecontainer::FileContainer;
 
 use libc::{c_void,c_char,c_int};
-
+use applayer::{AppLayerGetTxIterTuple};
 
 /// Rust parser declaration
 #[repr(C)]
@@ -94,6 +94,9 @@ pub struct RustParser {
 
     /// Function to get files
     pub get_files:         Option<GetFilesFn>,
+
+    /// Function to get the TX iterator
+    pub get_tx_iterator:   Option<GetTxIteratorFn>,
 }
 
 
@@ -120,7 +123,8 @@ pub type ParseFn      = extern "C" fn (flow: *const Flow,
                                        pstate: *mut c_void,
                                        input: *const u8,
                                        input_len: u32,
-                                       data: *const c_void) -> i8;
+                                       data: *const c_void,
+                                       flags: u8) -> i8;
 pub type ProbeFn      = extern "C" fn (flow: *const Flow,input:*const u8, input_len: u32, offset: *const u32) -> AppProto;
 pub type StateAllocFn = extern "C" fn () -> *mut c_void;
 pub type StateFreeFn  = extern "C" fn (*mut c_void);
@@ -140,6 +144,12 @@ pub type LocalStorageFreeFn = extern "C" fn (*mut c_void);
 pub type GetTxMpmIDFn       = extern "C" fn (*mut c_void) -> u64;
 pub type SetTxMpmIDFn       = extern "C" fn (*mut c_void, u64) -> c_int;
 pub type GetFilesFn         = extern "C" fn (*mut c_void, u8) -> *mut FileContainer;
+pub type GetTxIteratorFn    = extern "C" fn (ipproto: u8, alproto: AppProto,
+                                             state: *mut c_void,
+                                             min_tx_id: u64,
+                                             max_tx_id: u64,
+                                             istate: &mut u64)
+                                             -> AppLayerGetTxIterTuple;
 
 // Defined in app-layer-register.h
 extern {

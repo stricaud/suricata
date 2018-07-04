@@ -65,6 +65,8 @@
 #include "app-layer-ntp.h"
 #include "app-layer-tftp.h"
 #include "app-layer-ikev2.h"
+#include "app-layer-krb5.h"
+#include "app-layer-dhcp.h"
 #include "app-layer-template.h"
 
 #include "conf.h"
@@ -1142,7 +1144,8 @@ int AppLayerParserParse(ThreadVars *tv, AppLayerParserThreadCtx *alp_tctx, Flow 
         /* invoke the parser */
         if (p->Parser[(flags & STREAM_TOSERVER) ? 0 : 1](f, alstate, pstate,
                 input, input_len,
-                alp_tctx->alproto_local_storage[f->protomap][alproto]) < 0)
+                alp_tctx->alproto_local_storage[f->protomap][alproto],
+                flags) < 0)
         {
             goto error;
         }
@@ -1452,6 +1455,8 @@ void AppLayerParserRegisterProtocolParsers(void)
     RegisterNTPParsers();
     RegisterTFTPParsers();
     RegisterIKEV2Parsers();
+    RegisterKRB5Parsers();
+    RegisterDHCPParsers();
     RegisterTemplateParsers();
 
     /** IMAP */
@@ -1905,7 +1910,7 @@ typedef struct TestState_ {
  */
 static int TestProtocolParser(Flow *f, void *test_state, AppLayerParserState *pstate,
                               uint8_t *input, uint32_t input_len,
-                              void *local_data)
+                              void *local_data, const uint8_t flags)
 {
     SCEnter();
     SCReturnInt(-1);
