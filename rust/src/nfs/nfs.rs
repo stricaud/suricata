@@ -24,7 +24,6 @@ use std::mem::transmute;
 use std::collections::{HashMap};
 use std::ffi::CStr;
 
-use nom;
 use nom::IResult;
 
 use log::*;
@@ -40,15 +39,7 @@ use nfs::nfs_records::*;
 use nfs::nfs2_records::*;
 use nfs::nfs3_records::*;
 
-/// nom bug leads to this wrappers being necessary
-/// TODO for some reason putting these in parser.rs and making them public
-/// leads to a compile error wrt an unknown lifetime identifier 'a
-//named!(many0_nfs3_request_objects<Vec<Nfs3RequestObject<'a>>>, many0!(parse_nfs3_request_object));
-//named!(many0_nfs3_reply_objects<Vec<Nfs3ReplyObject<'a>>>, many0!(parse_nfs3_reply_object));
-named!(many0_nfs3_response_readdirplus_entries<Vec<Nfs3ResponseReaddirplusEntry<'a>>>,
-        many0!(parse_nfs3_response_readdirplus_entry_cond));
-
-pub static mut SURICATA_NFS3_FILE_CONFIG: Option<&'static SuricataFileContext> = None;
+pub static mut SURICATA_NFS_FILE_CONFIG: Option<&'static SuricataFileContext> = None;
 
 /*
  * Record parsing.
@@ -136,7 +127,7 @@ impl NFSTransactionFile {
 #[derive(Debug)]
 pub struct NFSTransaction {
     pub id: u64,    /// internal id
-    pub xid: u32,   /// nfs3 req/reply pair id
+    pub xid: u32,   /// nfs req/reply pair id
     pub procedure: u32,
     /// file name of the object we're dealing with. In case of RENAME
     /// this is the 'from' or original name.
@@ -294,7 +285,7 @@ pub fn filetracker_newchunk(ft: &mut FileTransferTracker, files: &mut FileContai
         flags: u16, name: &Vec<u8>, data: &[u8],
         chunk_offset: u64, chunk_size: u32, fill_bytes: u8, is_last: bool, xid: &u32)
 {
-    match unsafe {SURICATA_NFS3_FILE_CONFIG} {
+    match unsafe {SURICATA_NFS_FILE_CONFIG} {
         Some(sfcm) => {
             ft.new_chunk(sfcm, files, flags, &name, data, chunk_offset,
                     chunk_size, fill_bytes, is_last, xid); }
@@ -455,7 +446,7 @@ impl NFSState {
     }
 
     // TODO maybe not enough users to justify a func
-    fn mark_response_tx_done(&mut self, xid: u32, rpc_status: u32, nfs_status: u32, resp_handle: &Vec<u8>)
+    pub fn mark_response_tx_done(&mut self, xid: u32, rpc_status: u32, nfs_status: u32, resp_handle: &Vec<u8>)
     {
         match self.get_tx_by_xid(xid) {
             Some(mytx) => {
@@ -475,16 +466,15 @@ impl NFSState {
         }
     }
 
-    fn process_request_record_lookup<'b>(&mut self, r: &RpcPacket<'b>, xidmap: &mut NFSRequestXidMap) {
+    pub fn process_request_record_lookup<'b>(&mut self, r: &RpcPacket<'b>, xidmap: &mut NFSRequestXidMap) {
         match parse_nfs3_request_lookup(r.prog_data) {
             IResult::Done(_, lookup) => {
                 SCLogDebug!("LOOKUP {:?}", lookup);
                 xidmap.file_name = lookup.name_vec;
             },
-            IResult::Incomplete(_) => {
+            _ => {
                 self.set_event(NFSEvent::MalformedData);
             },
-            IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
         };
     }
 
@@ -506,286 +496,18 @@ impl NFSState {
         SCLogDebug!("REQUEST {} procedure {} ({}) blob size {}",
                 r.hdr.xid, r.procedure, self.requestmap.len(), r.prog_data.len());
 
-        if r.progver == 4 {
-            return self.process_request_record_v4(r);
+        match r.progver {
+            4 => {
+                self.process_request_record_v4(r)
+            },
+            3 => {
+                self.process_request_record_v3(r)
+            },
+            2 => {
+                self.process_request_record_v2(r)
+            },
+            _ => { 1 },
         }
-
-        let mut xidmap = NFSRequestXidMap::new(r.progver, r.procedure, 0);
-        let mut aux_file_name = Vec::new();
-
-        if self.nfs_version == 0 {
-            self.nfs_version = r.progver as u16;
-        }
-
-        if r.procedure == NFSPROC3_LOOKUP {
-            self.process_request_record_lookup(r, &mut xidmap);
-
-        } else if r.procedure == NFSPROC3_ACCESS {
-            match parse_nfs3_request_access(r.prog_data) {
-                IResult::Done(_, ar) => {
-                    xidmap.file_handle = ar.handle.value.to_vec();
-                    self.xidmap_handle2name(&mut xidmap);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_GETATTR {
-            match parse_nfs3_request_getattr(r.prog_data) {
-                IResult::Done(_, gar) => {
-                    xidmap.file_handle = gar.handle.value.to_vec();
-                    self.xidmap_handle2name(&mut xidmap);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_READDIRPLUS {
-            match parse_nfs3_request_readdirplus(r.prog_data) {
-                IResult::Done(_, rdp) => {
-                    xidmap.file_handle = rdp.handle.value.to_vec();
-                    self.xidmap_handle2name(&mut xidmap);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_READ {
-            match parse_nfs3_request_read(r.prog_data) {
-                IResult::Done(_, nfs3_read_record) => {
-                    xidmap.chunk_offset = nfs3_read_record.offset;
-                    xidmap.file_handle = nfs3_read_record.handle.value.to_vec();
-                    self.xidmap_handle2name(&mut xidmap);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_WRITE {
-            match parse_nfs3_request_write(r.prog_data) {
-                IResult::Done(_, w) => {
-                    self.process_write_record(r, &w);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            }
-        } else if r.procedure == NFSPROC3_CREATE {
-            match parse_nfs3_request_create(r.prog_data) {
-                IResult::Done(_, nfs3_create_record) => {
-                    xidmap.file_handle = nfs3_create_record.handle.value.to_vec();
-                    xidmap.file_name = nfs3_create_record.name_vec;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-
-        } else if r.procedure == NFSPROC3_REMOVE {
-            match parse_nfs3_request_remove(r.prog_data) {
-                IResult::Done(_, rr) => {
-                    xidmap.file_handle = rr.handle.value.to_vec();
-                    xidmap.file_name = rr.name_vec;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-
-        } else if r.procedure == NFSPROC3_RENAME {
-            match parse_nfs3_request_rename(r.prog_data) {
-                IResult::Done(_, rr) => {
-                    xidmap.file_handle = rr.from_handle.value.to_vec();
-                    xidmap.file_name = rr.from_name_vec;
-                    aux_file_name = rr.to_name_vec;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_MKDIR {
-            match parse_nfs3_request_mkdir(r.prog_data) {
-                IResult::Done(_, mr) => {
-                    xidmap.file_handle = mr.handle.value.to_vec();
-                    xidmap.file_name = mr.name_vec;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_RMDIR {
-            match parse_nfs3_request_rmdir(r.prog_data) {
-                IResult::Done(_, rr) => {
-                    xidmap.file_handle = rr.handle.value.to_vec();
-                    xidmap.file_name = rr.name_vec;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_COMMIT {
-            SCLogDebug!("COMMIT, closing shop");
-
-            match parse_nfs3_request_commit(r.prog_data) {
-                IResult::Done(_, cr) => {
-                    let file_handle = cr.handle.value.to_vec();
-                    match self.get_file_tx_by_handle(&file_handle, STREAM_TOSERVER) {
-                        Some((tx, files, flags)) => {
-                            let tdf = match tx.type_data {
-                                Some(NFSTransactionTypeData::FILE(ref mut d)) => d,
-                                _ => panic!("BUG"),
-                            };
-                            tdf.chunk_count += 1;
-                            tdf.file_additional_procs.push(NFSPROC3_COMMIT);
-                            tdf.file_tracker.close(files, flags);
-                            tdf.file_last_xid = r.hdr.xid;
-                            tx.is_last = true;
-                            tx.request_done = true;
-                        },
-                        None => { },
-                    }
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        }
-
-        if !(r.procedure == NFSPROC3_COMMIT || // commit handled separately
-             r.procedure == NFSPROC3_WRITE  || // write handled in file tx
-             r.procedure == NFSPROC3_READ)     // read handled in file tx at reply
-        {
-            let mut tx = self.new_tx();
-            tx.xid = r.hdr.xid;
-            tx.procedure = r.procedure;
-            tx.request_done = true;
-            tx.file_name = xidmap.file_name.to_vec();
-            tx.nfs_version = r.progver as u16;
-            tx.file_handle = xidmap.file_handle.to_vec();
-
-            if r.procedure == NFSPROC3_RENAME {
-                tx.type_data = Some(NFSTransactionTypeData::RENAME(aux_file_name));
-            }
-
-            tx.auth_type = r.creds_flavor;
-            match r.creds {
-                RpcRequestCreds::Unix(ref u) => {
-                    tx.request_machine_name = u.machine_name_buf.to_vec();
-                    tx.request_uid = u.uid;
-                    tx.request_gid = u.gid;
-                },
-                _ => { },
-            }
-            SCLogDebug!("TX created: ID {} XID {} PROCEDURE {}",
-                    tx.id, tx.xid, tx.procedure);
-            self.transactions.push(tx);
-
-        } else if r.procedure == NFSPROC3_READ {
-
-            let found = match self.get_file_tx_by_handle(&xidmap.file_handle, STREAM_TOCLIENT) {
-                Some((_, _, _)) => true,
-                None => false,
-            };
-            if !found {
-                let (tx, _, _) = self.new_file_tx(&xidmap.file_handle, &xidmap.file_name, STREAM_TOCLIENT);
-                tx.procedure = NFSPROC3_READ;
-                tx.xid = r.hdr.xid;
-                tx.is_first = true;
-                tx.nfs_version = r.progver as u16;
-
-                tx.auth_type = r.creds_flavor;
-                match r.creds {
-                    RpcRequestCreds::Unix(ref u) => {
-                        tx.request_machine_name = u.machine_name_buf.to_vec();
-                        tx.request_uid = u.uid;
-                        tx.request_gid = u.gid;
-                    },
-                    _ => { },
-                }
-            }
-        }
-
-        self.requestmap.insert(r.hdr.xid, xidmap);
-        0
-    }
-
-    /// complete request record
-    fn process_request_record_v2<'b>(&mut self, r: &RpcPacket<'b>) -> u32 {
-        SCLogDebug!("NFSv2 REQUEST {} procedure {} ({}) blob size {}",
-                r.hdr.xid, r.procedure, self.requestmap.len(), r.prog_data.len());
-
-        let mut xidmap = NFSRequestXidMap::new(r.progver, r.procedure, 0);
-        let aux_file_name = Vec::new();
-
-        if r.procedure == NFSPROC3_LOOKUP {
-            match parse_nfs2_request_lookup(r.prog_data) {
-                IResult::Done(_, ar) => {
-                    xidmap.file_handle = ar.handle.value.to_vec();
-                    self.xidmap_handle2name(&mut xidmap);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if r.procedure == NFSPROC3_READ {
-            match parse_nfs2_request_read(r.prog_data) {
-                IResult::Done(_, read_record) => {
-                    xidmap.chunk_offset = read_record.offset as u64;
-                    xidmap.file_handle = read_record.handle.value.to_vec();
-                    self.xidmap_handle2name(&mut xidmap);
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        }
-
-        if !(r.procedure == NFSPROC3_COMMIT || // commit handled separately
-             r.procedure == NFSPROC3_WRITE  || // write handled in file tx
-             r.procedure == NFSPROC3_READ)     // read handled in file tx at reply
-        {
-            let mut tx = self.new_tx();
-            tx.xid = r.hdr.xid;
-            tx.procedure = r.procedure;
-            tx.request_done = true;
-            tx.file_name = xidmap.file_name.to_vec();
-            tx.file_handle = xidmap.file_handle.to_vec();
-            tx.nfs_version = r.progver as u16;
-
-            if r.procedure == NFSPROC3_RENAME {
-                tx.type_data = Some(NFSTransactionTypeData::RENAME(aux_file_name));
-            }
-
-            tx.auth_type = r.creds_flavor;
-            match r.creds {
-                RpcRequestCreds::Unix(ref u) => {
-                    tx.request_machine_name = u.machine_name_buf.to_vec();
-                    tx.request_uid = u.uid;
-                    tx.request_gid = u.gid;
-                },
-                _ => { },
-            }
-            SCLogDebug!("NFSv2 TX created: ID {} XID {} PROCEDURE {}",
-                    tx.id, tx.xid, tx.procedure);
-            self.transactions.push(tx);
-        }
-
-        SCLogDebug!("NFSv2: TS creating xidmap {}", r.hdr.xid);
-        self.requestmap.insert(r.hdr.xid, xidmap);
-        0
     }
 
     pub fn new_file_tx(&mut self, file_handle: &Vec<u8>, file_name: &Vec<u8>, direction: u8)
@@ -798,11 +520,8 @@ impl NFSState {
         tx.file_tx_direction = direction;
 
         tx.type_data = Some(NFSTransactionTypeData::FILE(NFSTransactionFile::new()));
-        match tx.type_data {
-            Some(NFSTransactionTypeData::FILE(ref mut d)) => {
-                d.file_tracker.tx_id = tx.id - 1;
-            },
-            _ => { },
+        if let Some(NFSTransactionTypeData::FILE(ref mut d)) = tx.type_data {
+            d.file_tracker.tx_id = tx.id - 1;
         }
         SCLogDebug!("new_file_tx: TX FILE created: ID {} NAME {}",
                 tx.id, String::from_utf8_lossy(file_name));
@@ -830,7 +549,7 @@ impl NFSState {
         return None;
     }
 
-    fn process_write_record<'b>(&mut self, r: &RpcPacket<'b>, w: &Nfs3RequestWrite<'b>) -> u32 {
+    pub fn process_write_record<'b>(&mut self, r: &RpcPacket<'b>, w: &Nfs3RequestWrite<'b>) -> u32 {
         // for now assume that stable FILE_SYNC flags means a single chunk
         let is_last = if w.stable == 2 { true } else { false };
 
@@ -854,40 +573,38 @@ impl NFSState {
 
         let found = match self.get_file_tx_by_handle(&file_handle, STREAM_TOSERVER) {
             Some((tx, files, flags)) => {
-                let ref mut tdf = match tx.type_data {
-                    Some(NFSTransactionTypeData::FILE(ref mut x)) => x,
-                    _ => { panic!("BUG") },
-                };
-                filetracker_newchunk(&mut tdf.file_tracker, files, flags,
-                        &file_name, w.file_data, w.offset,
-                        w.file_len, fill_bytes as u8, is_last, &r.hdr.xid);
-                tdf.chunk_count += 1;
-                if is_last {
-                    tdf.file_last_xid = r.hdr.xid;
-                    tx.is_last = true;
-                    tx.response_done = true;
+                if let Some(NFSTransactionTypeData::FILE(ref mut tdf)) = tx.type_data {
+                    filetracker_newchunk(&mut tdf.file_tracker, files, flags,
+                            &file_name, w.file_data, w.offset,
+                            w.file_len, fill_bytes as u8, is_last, &r.hdr.xid);
+                    tdf.chunk_count += 1;
+                    if is_last {
+                        tdf.file_last_xid = r.hdr.xid;
+                        tx.is_last = true;
+                        tx.response_done = true;
+                    }
+                    true
+                } else {
+                    false
                 }
-                true
             },
             None => { false },
         };
         if !found {
             let (tx, files, flags) = self.new_file_tx(&file_handle, &file_name, STREAM_TOSERVER);
-            let ref mut tdf = match tx.type_data {
-                Some(NFSTransactionTypeData::FILE(ref mut x)) => x,
-                    _ => { panic!("BUG") },
-            };
-            filetracker_newchunk(&mut tdf.file_tracker, files, flags,
-                    &file_name, w.file_data, w.offset,
-                    w.file_len, fill_bytes as u8, is_last, &r.hdr.xid);
-            tx.procedure = NFSPROC3_WRITE;
-            tx.xid = r.hdr.xid;
-            tx.is_first = true;
-            tx.nfs_version = r.progver as u16;
-            if is_last {
-                tdf.file_last_xid = r.hdr.xid;
-                tx.is_last = true;
-                tx.request_done = true;
+            if let Some(NFSTransactionTypeData::FILE(ref mut tdf)) = tx.type_data {
+                filetracker_newchunk(&mut tdf.file_tracker, files, flags,
+                        &file_name, w.file_data, w.offset,
+                        w.file_len, fill_bytes as u8, is_last, &r.hdr.xid);
+                tx.procedure = NFSPROC3_WRITE;
+                tx.xid = r.hdr.xid;
+                tx.is_first = true;
+                tx.nfs_version = r.progver as u16;
+                if is_last {
+                    tdf.file_last_xid = r.hdr.xid;
+                    tx.is_last = true;
+                    tx.request_done = true;
+                }
             }
         }
         if !self.is_udp {
@@ -901,164 +618,11 @@ impl NFSState {
     fn process_partial_write_request_record<'b>(&mut self, r: &RpcPacket<'b>, w: &Nfs3RequestWrite<'b>) -> u32 {
         SCLogDebug!("REQUEST {} procedure {} blob size {}", r.hdr.xid, r.procedure, r.prog_data.len());
 
-        if r.procedure != NFSPROC3_WRITE {
-            panic!("call me for procedure WRITE *only*");
-        }
-
         let mut xidmap = NFSRequestXidMap::new(r.progver, r.procedure, 0);
         xidmap.file_handle = w.handle.value.to_vec();
         self.requestmap.insert(r.hdr.xid, xidmap);
 
         return self.process_write_record(r, w);
-    }
-
-    fn process_reply_record_v3<'b>(&mut self, r: &RpcReplyPacket<'b>, xidmap: &mut NFSRequestXidMap) -> u32 {
-        let mut nfs_status = 0;
-        let mut resp_handle = Vec::new();
-
-        if xidmap.procedure == NFSPROC3_LOOKUP {
-            match parse_nfs3_response_lookup(r.prog_data) {
-                IResult::Done(_, lookup) => {
-                    SCLogDebug!("LOOKUP: {:?}", lookup);
-                    SCLogDebug!("RESPONSE LOOKUP file_name {:?}", xidmap.file_name);
-
-                    nfs_status = lookup.status;
-
-                    SCLogDebug!("LOOKUP handle {:?}", lookup.handle);
-                    self.namemap.insert(lookup.handle.value.to_vec(), xidmap.file_name.to_vec());
-                    resp_handle = lookup.handle.value.to_vec();
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if xidmap.procedure == NFSPROC3_CREATE {
-            match parse_nfs3_response_create(r.prog_data) {
-                IResult::Done(_, nfs3_create_record) => {
-                    SCLogDebug!("nfs3_create_record: {:?}", nfs3_create_record);
-
-                    SCLogDebug!("RESPONSE CREATE file_name {:?}", xidmap.file_name);
-                    nfs_status = nfs3_create_record.status;
-
-                    if let Some(h) = nfs3_create_record.handle {
-                        SCLogDebug!("handle {:?}", h);
-                        self.namemap.insert(h.value.to_vec(), xidmap.file_name.to_vec());
-                        resp_handle = h.value.to_vec();
-                    }
-
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e);  },
-            };
-        } else if xidmap.procedure == NFSPROC3_READ {
-            match parse_nfs3_reply_read(r.prog_data) {
-                IResult::Done(_, ref reply) => {
-                    self.process_read_record(r, reply, Some(&xidmap));
-                    nfs_status = reply.status;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
-            }
-        } else if xidmap.procedure == NFSPROC3_READDIRPLUS {
-            match parse_nfs3_response_readdirplus(r.prog_data) {
-                IResult::Done(_, ref reply) => {
-                    //SCLogDebug!("READDIRPLUS reply {:?}", reply);
-
-                    nfs_status = reply.status;
-
-                    // cut off final eof field
-                    let d = &reply.data[..reply.data.len()-4 as usize];
-
-                    // store all handle/filename mappings
-                    match many0_nfs3_response_readdirplus_entries(d) {
-                        IResult::Done(_, ref entries) => {
-                            for ce in entries {
-                                SCLogDebug!("ce {:?}", ce);
-                                match ce.entry {
-                                    Some(ref e) => {
-                                        SCLogDebug!("e {:?}", e);
-                                        match e.handle {
-                                            Some(ref h) => {
-                                                SCLogDebug!("h {:?}", h);
-                                                self.namemap.insert(h.value.to_vec(), e.name_vec.to_vec());
-                                            },
-                                            _ => { },
-                                        }
-                                    },
-                                    _ => { },
-                                }
-                            }
-
-                            SCLogDebug!("READDIRPLUS ENTRIES reply {:?}", entries);
-                        },
-                        IResult::Incomplete(_) => {
-                            self.set_event(NFSEvent::MalformedData);
-                        },
-                        IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
-                    }
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
-            }
-        }
-        // for all other record types only parse the status
-        else {
-            let stat = match nom::be_u32(&r.prog_data) {
-                nom::IResult::Done(_, stat) => {
-                    stat as u32
-                }
-                _ => 0 as u32
-            };
-            nfs_status = stat;
-        }
-        SCLogDebug!("REPLY {} to procedure {} blob size {}",
-                r.hdr.xid, xidmap.procedure, r.prog_data.len());
-
-        if xidmap.procedure != NFSPROC3_READ {
-            self.mark_response_tx_done(r.hdr.xid, r.reply_state, nfs_status, &resp_handle);
-        }
-
-        0
-    }
-
-    fn process_reply_record_v2<'b>(&mut self, r: &RpcReplyPacket<'b>, xidmap: &NFSRequestXidMap) -> u32 {
-        let mut nfs_status = 0;
-        let resp_handle = Vec::new();
-
-        if xidmap.procedure == NFSPROC3_READ {
-            match parse_nfs2_reply_read(r.prog_data) {
-                IResult::Done(_, ref reply) => {
-                    SCLogDebug!("NFSv2 READ reply record");
-                    self.process_read_record(r, reply, Some(&xidmap));
-                    nfs_status = reply.status;
-                },
-                IResult::Incomplete(_) => {
-                    self.set_event(NFSEvent::MalformedData);
-                },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
-            }
-        } else {
-            let stat = match nom::be_u32(&r.prog_data) {
-                nom::IResult::Done(_, stat) => {
-                    stat as u32
-                }
-                _ => 0 as u32
-            };
-            nfs_status = stat;
-        }
-        SCLogDebug!("REPLY {} to procedure {} blob size {}",
-                r.hdr.xid, xidmap.procedure, r.prog_data.len());
-
-        self.mark_response_tx_done(r.hdr.xid, r.reply_state, nfs_status, &resp_handle);
-
-        0
     }
 
     fn process_reply_record<'b>(&mut self, r: &RpcReplyPacket<'b>) -> u32 {
@@ -1174,31 +738,31 @@ impl NFSState {
         // get the tx and update it
         let consumed = match self.get_file_tx_by_handle(&file_handle, direction) {
             Some((tx, files, flags)) => {
-                let ref mut tdf = match tx.type_data {
-                    Some(NFSTransactionTypeData::FILE(ref mut x)) => x,
-                    _ => { panic!("BUG") },
-                };
-                if ssn_gap {
-                    let queued_data = tdf.file_tracker.get_queued_size();
-                    if queued_data > 2000000 { // TODO should probably be configurable
-                        SCLogDebug!("QUEUED size {} while we've seen GAPs. Truncating file.", queued_data);
-                        tdf.file_tracker.trunc(files, flags);
+                if let Some(NFSTransactionTypeData::FILE(ref mut tdf)) = tx.type_data {
+                    if ssn_gap {
+                        let queued_data = tdf.file_tracker.get_queued_size();
+                        if queued_data > 2000000 { // TODO should probably be configurable
+                            SCLogDebug!("QUEUED size {} while we've seen GAPs. Truncating file.", queued_data);
+                            tdf.file_tracker.trunc(files, flags);
+                        }
                     }
-                }
 
-                tdf.chunk_count += 1;
-                let cs = tdf.file_tracker.update(files, flags, data, gap_size);
-                /* see if we need to close the tx */
-                if tdf.file_tracker.is_done() {
-                    if direction == STREAM_TOCLIENT {
-                        tx.response_done = true;
-                        SCLogDebug!("TX {} response is done now that the file track is ready", tx.id);
-                    } else {
-                        tx.request_done = true;
-                        SCLogDebug!("TX {} request is done now that the file track is ready", tx.id);
+                    tdf.chunk_count += 1;
+                    let cs = tdf.file_tracker.update(files, flags, data, gap_size);
+                    /* see if we need to close the tx */
+                    if tdf.file_tracker.is_done() {
+                        if direction == STREAM_TOCLIENT {
+                            tx.response_done = true;
+                            SCLogDebug!("TX {} response is done now that the file track is ready", tx.id);
+                        } else {
+                            tx.request_done = true;
+                            SCLogDebug!("TX {} request is done now that the file track is ready", tx.id);
+                        }
                     }
+                    cs
+                } else {
+                    0
                 }
-                cs
             },
             None => { 0 },
         };
@@ -1223,14 +787,13 @@ impl NFSState {
                 nfs_version = xidmap.progver;
             },
             None => {
-                match self.requestmap.get(&r.hdr.xid) {
-                    Some(xidmap) => {
-                        file_name = xidmap.file_name.to_vec();
-                        file_handle = xidmap.file_handle.to_vec();
-                        chunk_offset = xidmap.chunk_offset;
-                        nfs_version = xidmap.progver;
-                    },
-                    _ => { panic!("REPLY: xid {} NOT FOUND", r.hdr.xid); },
+                if let Some(xidmap) = self.requestmap.get(&r.hdr.xid) {
+                    file_name = xidmap.file_name.to_vec();
+                    file_handle = xidmap.file_handle.to_vec();
+                    chunk_offset = xidmap.chunk_offset;
+                    nfs_version = xidmap.progver;
+                } else {
+                    return 0;
                 }
             },
         }
@@ -1267,14 +830,41 @@ impl NFSState {
         let found = match self.get_file_tx_by_handle(&file_handle, STREAM_TOCLIENT) {
             Some((tx, files, flags)) => {
                 SCLogDebug!("updated TX {:?}", tx);
-                let ref mut tdf = match tx.type_data {
-                    Some(NFSTransactionTypeData::FILE(ref mut x)) => x,
-                    _ => { panic!("BUG") },
-                };
+                if let Some(NFSTransactionTypeData::FILE(ref mut tdf)) = tx.type_data {
+                    filetracker_newchunk(&mut tdf.file_tracker, files, flags,
+                            &file_name, reply.data, chunk_offset,
+                            reply.count, fill_bytes as u8, is_last, &r.hdr.xid);
+                    tdf.chunk_count += 1;
+                    if is_last {
+                        tdf.file_last_xid = r.hdr.xid;
+                        tx.rpc_response_status = r.reply_state;
+                        tx.nfs_response_status = reply.status;
+                        tx.is_last = true;
+                        tx.request_done = true;
+
+                        /* if this is a partial record we will close the tx
+                         * when we've received the final data */
+                        if !is_partial {
+                            tx.response_done = true;
+                            SCLogDebug!("TX {} is DONE", tx.id);
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            },
+            None => { false },
+        };
+        if !found {
+            let (tx, files, flags) = self.new_file_tx(&file_handle, &file_name, STREAM_TOCLIENT);
+            if let Some(NFSTransactionTypeData::FILE(ref mut tdf)) = tx.type_data {
                 filetracker_newchunk(&mut tdf.file_tracker, files, flags,
                         &file_name, reply.data, chunk_offset,
                         reply.count, fill_bytes as u8, is_last, &r.hdr.xid);
-                tdf.chunk_count += 1;
+                tx.procedure = if nfs_version < 4 { NFSPROC3_READ } else { NFSPROC4_READ };
+                tx.xid = r.hdr.xid;
+                tx.is_first = true;
                 if is_last {
                     tdf.file_last_xid = r.hdr.xid;
                     tx.rpc_response_status = r.reply_state;
@@ -1288,35 +878,6 @@ impl NFSState {
                         tx.response_done = true;
                         SCLogDebug!("TX {} is DONE", tx.id);
                     }
-                }
-                true
-            },
-            None => { false },
-        };
-        if !found {
-            let (tx, files, flags) = self.new_file_tx(&file_handle, &file_name, STREAM_TOCLIENT);
-            let ref mut tdf = match tx.type_data {
-                Some(NFSTransactionTypeData::FILE(ref mut x)) => x,
-                _ => { panic!("BUG") },
-            };
-            filetracker_newchunk(&mut tdf.file_tracker, files, flags,
-                    &file_name, reply.data, chunk_offset,
-                    reply.count, fill_bytes as u8, is_last, &r.hdr.xid);
-            tx.procedure = if nfs_version < 4 { NFSPROC3_READ } else { NFSPROC4_READ };
-            tx.xid = r.hdr.xid;
-            tx.is_first = true;
-            if is_last {
-                tdf.file_last_xid = r.hdr.xid;
-                tx.rpc_response_status = r.reply_state;
-                tx.nfs_response_status = reply.status;
-                tx.is_last = true;
-                tx.request_done = true;
-
-                /* if this is a partial record we will close the tx
-                 * when we've received the final data */
-                if !is_partial {
-                    tx.response_done = true;
-                    SCLogDebug!("TX {} is DONE", tx.id);
                 }
             }
         }
@@ -1355,7 +916,8 @@ impl NFSState {
         let gap = vec![0; gap_size as usize];
         let consumed = self.filetracker_update(STREAM_TOSERVER, &gap, gap_size);
         if consumed > gap_size {
-            panic!("consumed more than GAP size: {} > {}", consumed, gap_size);
+            SCLogDebug!("consumed more than GAP size: {} > {}", consumed, gap_size);
+            return 1;
         }
         self.ts_ssn_gap = true;
         self.ts_gap = true;
@@ -1369,7 +931,8 @@ impl NFSState {
         let gap = vec![0; gap_size as usize];
         let consumed = self.filetracker_update(STREAM_TOCLIENT, &gap, gap_size);
         if consumed > gap_size {
-            panic!("consumed more than GAP size: {} > {}", consumed, gap_size);
+            SCLogDebug!("consumed more than GAP size: {} > {}", consumed, gap_size);
+            return 1;
         }
         self.tc_ssn_gap = true;
         self.tc_gap = true;
@@ -1406,7 +969,7 @@ impl NFSState {
         // and skip buffer beyond it
         let consumed = self.filetracker_update(STREAM_TOSERVER, cur_i, 0);
         if consumed > 0 {
-            if consumed > cur_i.len() as u32 { panic!("BUG consumed more than we gave it"); }
+            if consumed > cur_i.len() as u32 { return 1; }
             cur_i = &cur_i[consumed as usize..];
         }
         if self.ts_gap {
@@ -1415,7 +978,7 @@ impl NFSState {
             let mut cnt = 0;
             while cur_i.len() > 0 {
                 cnt += 1;
-                match nfs3_probe(cur_i, STREAM_TOSERVER) {
+                match nfs_probe(cur_i, STREAM_TOSERVER) {
                     1 => {
                         SCLogDebug!("expected data found");
                         self.ts_gap = false;
@@ -1432,7 +995,7 @@ impl NFSState {
                             SCLogDebug!("all post-GAP data in this chunk was bad. Looped {} times.", cnt);
                         }
                     },
-                    _ => { panic!("hell just froze over"); },
+                    _ => { return 1; },
                 }
             }
             SCLogDebug!("TS GAP handling done (input {})", cur_i.len());
@@ -1465,10 +1028,9 @@ impl NFSState {
                                                 status |= self.process_partial_write_request_record(rpc_record, nfs_request_write);
                                                 cur_i = remaining; // progress input past parsed record
                                             },
-                                            IResult::Incomplete(_) => {
+                                            _ => {
                                                 self.set_event(NFSEvent::MalformedData);
                                             },
-                                            IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
                                         }
                                     },
                                     IResult::Incomplete(_) => {
@@ -1478,7 +1040,11 @@ impl NFSState {
                                         // and try again on our next iteration.
                                         SCLogDebug!("TS data incomplete");
                                     },
-                                    IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
+                                    IResult::Error(_e) => {
+                                        self.set_event(NFSEvent::MalformedData);
+                                        SCLogDebug!("Parsing failed: {:?}", _e);
+                                        return 1;
+                                    },
                                 }
                             }
                         }
@@ -1503,7 +1069,10 @@ impl NFSState {
 
                             status = 1;
                         },
-                        IResult::Error(e) => { panic!("Parsing failed: {:?}",e); //break
+                        IResult::Error(_e) => {
+                            self.set_event(NFSEvent::MalformedData);
+                            SCLogDebug!("Parsing failed: {:?}", _e);
+                            return 1;
                         },
                     }
                 },
@@ -1512,7 +1081,10 @@ impl NFSState {
                     self.tcp_buffer_ts.extend_from_slice(cur_i);
                     break;
                 },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e); //break
+                IResult::Error(_e) => {
+                    self.set_event(NFSEvent::MalformedData);
+                    SCLogDebug!("Parsing failed: {:?}", _e);
+                    return 1;
                 },
             }
         };
@@ -1551,7 +1123,7 @@ impl NFSState {
         // and skip buffer beyond it
         let consumed = self.filetracker_update(STREAM_TOCLIENT, cur_i, 0);
         if consumed > 0 {
-            if consumed > cur_i.len() as u32 { panic!("BUG consumed more than we gave it"); }
+            if consumed > cur_i.len() as u32 { return 1; }
             cur_i = &cur_i[consumed as usize..];
         }
         if self.tc_gap {
@@ -1560,7 +1132,7 @@ impl NFSState {
             let mut cnt = 0;
             while cur_i.len() > 0 {
                 cnt += 1;
-                match nfs3_probe(cur_i, STREAM_TOCLIENT) {
+                match nfs_probe(cur_i, STREAM_TOCLIENT) {
                     1 => {
                         SCLogDebug!("expected data found");
                         self.tc_gap = false;
@@ -1577,7 +1149,7 @@ impl NFSState {
                             SCLogDebug!("all post-GAP data in this chunk was bad. Looped {} times.", cnt);
                         }
                     },
-                    _ => { panic!("hell just froze over"); },
+                    _ => { return 1; },
                 }
             }
             SCLogDebug!("TC GAP handling done (input {})", cur_i.len());
@@ -1611,7 +1183,11 @@ impl NFSState {
                                             IResult::Incomplete(_) => {
                                                 self.set_event(NFSEvent::MalformedData);
                                             },
-                                            IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
+                                            IResult::Error(_e) => {
+                                                self.set_event(NFSEvent::MalformedData);
+                                                SCLogDebug!("Parsing failed: {:?}", _e);
+                                                return 1;
+                                            }
                                         }
                                     },
                                     IResult::Incomplete(_) => {
@@ -1619,7 +1195,11 @@ impl NFSState {
                                         // so Incomplete is normal.
                                         SCLogDebug!("TC data incomplete");
                                     },
-                                    IResult::Error(e) => { panic!("Parsing failed: {:?}",e); },
+                                    IResult::Error(_e) => {
+                                        self.set_event(NFSEvent::MalformedData);
+                                        SCLogDebug!("Parsing failed: {:?}", _e);
+                                        return 1;
+                                    }
                                 }
                             }
                         }
@@ -1643,8 +1223,11 @@ impl NFSState {
 
                             status = 1;
                         },
-                        IResult::Error(e) => { panic!("Parsing failed: {:?}",e); //break
-                        },
+                        IResult::Error(_e) => {
+                            self.set_event(NFSEvent::MalformedData);
+                            SCLogDebug!("Parsing failed: {:?}", _e);
+                            return 1;
+                        }
                     }
                 },
                 IResult::Incomplete(_) => {
@@ -1652,7 +1235,11 @@ impl NFSState {
                     self.tcp_buffer_tc.extend_from_slice(cur_i);
                     break;
                 },
-                IResult::Error(e) => { SCLogDebug!("Parsing failed: {:?}",e); break },
+                IResult::Error(_e) => {
+                    self.set_event(NFSEvent::MalformedData);
+                    SCLogDebug!("Parsing failed: {:?}", _e);
+                    return 1;
+                },
             }
         };
         status
@@ -1672,12 +1259,12 @@ impl NFSState {
                         2 => {
                             status |= self.process_request_record_v2(rpc_record);
                         },
-                        _ => { panic!("unsupported NFS version"); },
+                        _ => { status = 1; },
                     }
                 },
                 IResult::Incomplete(_) => {
                 },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e); //break
+                IResult::Error(_e) => { SCLogDebug!("Parsing failed: {:?}", _e);
                 },
             }
         }
@@ -1696,7 +1283,8 @@ impl NFSState {
                 },
                 IResult::Incomplete(_) => {
                 },
-                IResult::Error(e) => { panic!("Parsing failed: {:?}",e); //break
+                IResult::Error(_e) => {
+                    SCLogDebug!("Parsing failed: {:?}", _e);
                 },
             }
         };
@@ -1722,7 +1310,7 @@ impl NFSState {
 
 /// Returns *mut NFSState
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_new() -> *mut libc::c_void {
+pub extern "C" fn rs_nfs_state_new() -> *mut libc::c_void {
     let state = NFSState::new();
     let boxed = Box::new(state);
     SCLogDebug!("allocating state");
@@ -1732,11 +1320,11 @@ pub extern "C" fn rs_nfs3_state_new() -> *mut libc::c_void {
 /// Params:
 /// - state: *mut NFSState as void pointer
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_free(state: *mut libc::c_void) {
+pub extern "C" fn rs_nfs_state_free(state: *mut libc::c_void) {
     // Just unbox...
     SCLogDebug!("freeing state");
-    let mut nfs3_state: Box<NFSState> = unsafe{transmute(state)};
-    nfs3_state.free();
+    let mut nfs_state: Box<NFSState> = unsafe{transmute(state)};
+    nfs_state.free();
 }
 
 /// C binding parse a NFS TCP request. Returns 1 on success, -1 on failure.
@@ -1804,7 +1392,7 @@ pub extern "C" fn rs_nfs_parse_response_tcp_gap(
 
 /// C binding parse a DNS request. Returns 1 on success, -1 on failure.
 #[no_mangle]
-pub extern "C" fn rs_nfs3_parse_request_udp(_flow: *mut Flow,
+pub extern "C" fn rs_nfs_parse_request_udp(_flow: *mut Flow,
                                        state: &mut NFSState,
                                        _pstate: *mut libc::c_void,
                                        input: *mut libc::uint8_t,
@@ -1823,7 +1411,7 @@ pub extern "C" fn rs_nfs3_parse_request_udp(_flow: *mut Flow,
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_parse_response_udp(_flow: *mut Flow,
+pub extern "C" fn rs_nfs_parse_response_udp(_flow: *mut Flow,
                                         state: &mut NFSState,
                                         _pstate: *mut libc::c_void,
                                         input: *mut libc::uint8_t,
@@ -1842,15 +1430,15 @@ pub extern "C" fn rs_nfs3_parse_response_udp(_flow: *mut Flow,
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_get_tx_count(state: &mut NFSState)
+pub extern "C" fn rs_nfs_state_get_tx_count(state: &mut NFSState)
                                             -> libc::uint64_t
 {
-    SCLogDebug!("rs_nfs3_state_get_tx_count: returning {}", state.tx_id);
+    SCLogDebug!("rs_nfs_state_get_tx_count: returning {}", state.tx_id);
     return state.tx_id;
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_get_tx(state: &mut NFSState,
+pub extern "C" fn rs_nfs_state_get_tx(state: &mut NFSState,
                                       tx_id: libc::uint64_t)
                                       -> *mut NFSTransaction
 {
@@ -1885,14 +1473,14 @@ pub extern "C" fn rs_nfs_state_get_tx_iterator(
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_tx_free(state: &mut NFSState,
+pub extern "C" fn rs_nfs_state_tx_free(state: &mut NFSState,
                                        tx_id: libc::uint64_t)
 {
     state.free_tx(tx_id);
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_progress_completion_status(
+pub extern "C" fn rs_nfs_state_progress_completion_status(
     _direction: libc::uint8_t)
     -> libc::c_int
 {
@@ -1900,7 +1488,7 @@ pub extern "C" fn rs_nfs3_state_progress_completion_status(
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_tx_get_alstate_progress(tx: &mut NFSTransaction,
+pub extern "C" fn rs_nfs_tx_get_alstate_progress(tx: &mut NFSTransaction,
                                                   direction: libc::uint8_t)
                                                   -> libc::uint8_t
 {
@@ -1917,7 +1505,7 @@ pub extern "C" fn rs_nfs3_tx_get_alstate_progress(tx: &mut NFSTransaction,
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_tx_set_logged(_state: &mut NFSState,
+pub extern "C" fn rs_nfs_tx_set_logged(_state: &mut NFSState,
                                        tx: &mut NFSTransaction,
                                        logged: libc::uint32_t)
 {
@@ -1925,7 +1513,7 @@ pub extern "C" fn rs_nfs3_tx_set_logged(_state: &mut NFSState,
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_tx_get_logged(_state: &mut NFSState,
+pub extern "C" fn rs_nfs_tx_get_logged(_state: &mut NFSState,
                                        tx: &mut NFSTransaction)
                                        -> u32
 {
@@ -1933,7 +1521,7 @@ pub extern "C" fn rs_nfs3_tx_get_logged(_state: &mut NFSState,
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_set_tx_detect_state(
+pub extern "C" fn rs_nfs_state_set_tx_detect_state(
     tx: &mut NFSTransaction,
     de_state: &mut DetectEngineState)
 {
@@ -1941,7 +1529,7 @@ pub extern "C" fn rs_nfs3_state_set_tx_detect_state(
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_state_get_tx_detect_state(
+pub extern "C" fn rs_nfs_state_get_tx_detect_state(
     tx: &mut NFSTransaction)
     -> *mut DetectEngineState
 {
@@ -2028,10 +1616,10 @@ pub extern "C" fn rs_nfs_state_get_event_info(event_name: *const libc::c_char,
 /// otherwise get procs from the 'file_additional_procs'.
 /// Keep calling until 0 is returned.
 #[no_mangle]
-pub extern "C" fn rs_nfs3_tx_get_procedures(tx: &mut NFSTransaction,
-                                       i: libc::uint16_t,
-                                       procedure: *mut libc::uint32_t)
-                                       -> libc::uint8_t
+pub extern "C" fn rs_nfs_tx_get_procedures(tx: &mut NFSTransaction,
+                                           i: libc::uint16_t,
+                                           procedure: *mut libc::uint32_t)
+                                           -> libc::uint8_t
 {
     if i == 0 {
         unsafe {
@@ -2046,25 +1634,22 @@ pub extern "C" fn rs_nfs3_tx_get_procedures(tx: &mut NFSTransaction,
 
     /* file tx handling follows */
 
-    let ref tdf = match tx.type_data {
-        Some(NFSTransactionTypeData::FILE(ref x)) => x,
-        _ => { panic!("BUG") },
-    };
-
-    let idx = i as usize - 1;
-    if idx < tdf.file_additional_procs.len() {
-        let p = tdf.file_additional_procs[idx];
-        unsafe {
-            *procedure = p as libc::uint32_t;
+    if let Some(NFSTransactionTypeData::FILE(ref mut tdf)) = tx.type_data {
+        let idx = i as usize - 1;
+        if idx < tdf.file_additional_procs.len() {
+            let p = tdf.file_additional_procs[idx];
+            unsafe {
+                *procedure = p as libc::uint32_t;
+            }
+            return 1;
         }
-        return 1;
     }
     return 0;
 }
 
 #[no_mangle]
 pub extern "C" fn rs_nfs_tx_get_version(tx: &mut NFSTransaction,
-                                       version: *mut libc::uint32_t)
+                                        version: *mut libc::uint32_t)
 {
     unsafe {
         *version = tx.nfs_version as libc::uint32_t;
@@ -2072,14 +1657,14 @@ pub extern "C" fn rs_nfs_tx_get_version(tx: &mut NFSTransaction,
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_init(context: &'static mut SuricataFileContext)
+pub extern "C" fn rs_nfs_init(context: &'static mut SuricataFileContext)
 {
     unsafe {
-        SURICATA_NFS3_FILE_CONFIG = Some(context);
+        SURICATA_NFS_FILE_CONFIG = Some(context);
     }
 }
 
-pub fn nfs3_probe(i: &[u8], direction: u8) -> i8 {
+pub fn nfs_probe(i: &[u8], direction: u8) -> i8 {
     if direction == STREAM_TOCLIENT {
         match parse_rpc_reply(i) {
             IResult::Done(_, ref rpc) => {
@@ -2136,7 +1721,7 @@ pub fn nfs3_probe(i: &[u8], direction: u8) -> i8 {
     }
 }
 
-pub fn nfs3_probe_udp(i: &[u8], direction: u8) -> i8 {
+pub fn nfs_probe_udp(i: &[u8], direction: u8) -> i8 {
     if direction == STREAM_TOCLIENT {
         match parse_rpc_udp_reply(i) {
             IResult::Done(_, ref rpc) => {
@@ -2184,8 +1769,9 @@ pub extern "C" fn rs_nfs_probe_ts(input: *const libc::uint8_t, len: libc::uint32
     let slice: &[u8] = unsafe {
         std::slice::from_raw_parts(input as *mut u8, len as usize)
     };
-    return nfs3_probe(slice, STREAM_TOSERVER);
+    return nfs_probe(slice, STREAM_TOSERVER);
 }
+
 /// TOCLIENT probe function
 #[no_mangle]
 pub extern "C" fn rs_nfs_probe_tc(input: *const libc::uint8_t, len: libc::uint32_t)
@@ -2194,7 +1780,7 @@ pub extern "C" fn rs_nfs_probe_tc(input: *const libc::uint8_t, len: libc::uint32
     let slice: &[u8] = unsafe {
         std::slice::from_raw_parts(input as *mut u8, len as usize)
     };
-    return nfs3_probe(slice, STREAM_TOCLIENT);
+    return nfs_probe(slice, STREAM_TOCLIENT);
 }
 
 /// TOSERVER probe function
@@ -2205,8 +1791,9 @@ pub extern "C" fn rs_nfs_probe_udp_ts(input: *const libc::uint8_t, len: libc::ui
     let slice: &[u8] = unsafe {
         std::slice::from_raw_parts(input as *mut u8, len as usize)
     };
-    return nfs3_probe_udp(slice, STREAM_TOSERVER);
+    return nfs_probe_udp(slice, STREAM_TOSERVER);
 }
+
 /// TOCLIENT probe function
 #[no_mangle]
 pub extern "C" fn rs_nfs_probe_udp_tc(input: *const libc::uint8_t, len: libc::uint32_t)
@@ -2215,17 +1802,17 @@ pub extern "C" fn rs_nfs_probe_udp_tc(input: *const libc::uint8_t, len: libc::ui
     let slice: &[u8] = unsafe {
         std::slice::from_raw_parts(input as *mut u8, len as usize)
     };
-    return nfs3_probe_udp(slice, STREAM_TOCLIENT);
+    return nfs_probe_udp(slice, STREAM_TOCLIENT);
 }
 
 #[no_mangle]
-pub extern "C" fn rs_nfs3_getfiles(direction: u8, ptr: *mut NFSState) -> * mut FileContainer {
+pub extern "C" fn rs_nfs_getfiles(direction: u8, ptr: *mut NFSState) -> * mut FileContainer {
     if ptr.is_null() { panic!("NULL ptr"); };
     let parser = unsafe { &mut *ptr };
     parser.getfiles(direction)
 }
 #[no_mangle]
-pub extern "C" fn rs_nfs3_setfileflags(direction: u8, ptr: *mut NFSState, flags: u16) {
+pub extern "C" fn rs_nfs_setfileflags(direction: u8, ptr: *mut NFSState, flags: u16) {
     if ptr.is_null() { panic!("NULL ptr"); };
     let parser = unsafe { &mut *ptr };
     SCLogDebug!("direction {} flags {}", direction, flags);

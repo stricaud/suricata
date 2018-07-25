@@ -364,6 +364,69 @@ pub enum SMBTransactionTypeData {
     SESSIONSETUP(SMBTransactionSessionSetup),
     IOCTL(SMBTransactionIoctl),
     RENAME(SMBTransactionRename),
+    SETFILEPATHINFO(SMBTransactionSetFilePathInfo),
+}
+
+// Used for Trans2 SET_PATH_INFO and SET_FILE_INFO
+#[derive(Debug)]
+pub struct SMBTransactionSetFilePathInfo {
+    pub subcmd: u16,
+    pub loi: u16,
+    pub delete_on_close: bool,
+    pub filename: Vec<u8>,
+    pub fid: Vec<u8>,
+}
+
+impl SMBTransactionSetFilePathInfo {
+    pub fn new(filename: Vec<u8>, fid: Vec<u8>, subcmd: u16, loi: u16, delete_on_close: bool)
+        -> SMBTransactionSetFilePathInfo
+    {
+        return SMBTransactionSetFilePathInfo {
+            filename: filename, fid: fid,
+            subcmd: subcmd,
+            loi: loi,
+            delete_on_close: delete_on_close,
+        }
+    }
+}
+
+impl SMBState {
+    pub fn new_setfileinfo_tx(&mut self, filename: Vec<u8>, fid: Vec<u8>,
+            subcmd: u16, loi: u16, delete_on_close: bool)
+        -> (&mut SMBTransaction)
+    {
+        let mut tx = self.new_tx();
+
+        tx.type_data = Some(SMBTransactionTypeData::SETFILEPATHINFO(
+                    SMBTransactionSetFilePathInfo::new(
+                        filename, fid, subcmd, loi, delete_on_close)));
+        tx.request_done = true;
+        tx.response_done = self.tc_trunc; // no response expected if tc is truncated
+
+        SCLogDebug!("SMB: TX SETFILEPATHINFO created: ID {}", tx.id);
+        self.transactions.push(tx);
+        let tx_ref = self.transactions.last_mut();
+        return tx_ref.unwrap();
+    }
+
+    pub fn new_setpathinfo_tx(&mut self, filename: Vec<u8>,
+            subcmd: u16, loi: u16, delete_on_close: bool)
+        -> (&mut SMBTransaction)
+    {
+        let mut tx = self.new_tx();
+
+        let fid : Vec<u8> = Vec::new();
+        tx.type_data = Some(SMBTransactionTypeData::SETFILEPATHINFO(
+                    SMBTransactionSetFilePathInfo::new(filename, fid,
+                        subcmd, loi, delete_on_close)));
+        tx.request_done = true;
+        tx.response_done = self.tc_trunc; // no response expected if tc is truncated
+
+        SCLogDebug!("SMB: TX SETFILEPATHINFO created: ID {}", tx.id);
+        self.transactions.push(tx);
+        let tx_ref = self.transactions.last_mut();
+        return tx_ref.unwrap();
+    }
 }
 
 #[derive(Debug)]
@@ -574,10 +637,9 @@ pub const SMBHDR_TYPE_OFFSET:      u32 = 4;
 pub const SMBHDR_TYPE_GENERICTX:   u32 = 5;
 pub const SMBHDR_TYPE_HEADER:      u32 = 6;
 pub const SMBHDR_TYPE_MAX_SIZE:    u32 = 7; // max resp size for SMB1_COMMAND_TRANS
-pub const SMBHDR_TYPE_TXNAME:      u32 = 8; // SMB1_COMMAND_TRANS tx_name
-pub const SMBHDR_TYPE_TRANS_FRAG:  u32 = 9;
-pub const SMBHDR_TYPE_TREE:        u32 = 10;
-pub const SMBHDR_TYPE_DCERPCTX:    u32 = 11;
+pub const SMBHDR_TYPE_TRANS_FRAG:  u32 = 8;
+pub const SMBHDR_TYPE_TREE:        u32 = 9;
+pub const SMBHDR_TYPE_DCERPCTX:    u32 = 10;
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct SMBCommonHdr {
@@ -1044,13 +1106,19 @@ impl SMBState {
     {
         let (name, is_dcerpc) = match self.guid2name_map.get(&guid.to_vec()) {
             Some(n) => {
-                match str::from_utf8(&n) {
+                let mut s = n.as_slice();
+                // skip leading \ if we have it
+                if s.len() > 1 && s[0] == 0x5c_u8 {
+                    s = &s[1..];
+                }
+                match str::from_utf8(s) {
                     Ok("PSEXESVC") => ("PSEXESVC", false),
                     Ok("svcctl") => ("svcctl", true),
                     Ok("srvsvc") => ("srvsvc", true),
                     Ok("atsvc") => ("atsvc", true),
                     Ok("lsarpc") => ("lsarpc", true),
                     Ok("samr") => ("samr", true),
+                    Ok("spoolss") => ("spoolss", true),
                     Err(_) => ("MALFORMED", false),
                     Ok(&_) => {
                         SCLogDebug!("don't know {}", String::from_utf8_lossy(&n));
