@@ -42,9 +42,9 @@ typedef struct AppLayerParserState_ AppLayerParserState;
 
 /* per flow flags */
 
-/** At least on packet from the source address was seen */
+/** At least one packet from the source address was seen */
 #define FLOW_TO_SRC_SEEN                BIT_U32(0)
-/** At least on packet from the destination address was seen */
+/** At least one packet from the destination address was seen */
 #define FLOW_TO_DST_SEEN                BIT_U32(1)
 /** Don't return this from the flow hash. It has been replaced. */
 #define FLOW_TCP_REUSED                 BIT_U32(2)
@@ -374,15 +374,15 @@ typedef struct Flow_
 
     uint32_t flags;         /**< generic flags */
 
-    /* Parent flow id for protocol like ftp */
-    int64_t parent_id;
-
     uint16_t file_flags;    /**< file tracking/extraction flags */
     /* coccinelle: Flow:file_flags:FLOWFILE_ */
 
     /** destination port to be used in protocol detection. This is meant
      *  for use with STARTTLS and HTTP CONNECT detection */
     uint16_t protodetect_dp; /**< 0 if not used */
+
+    /* Parent flow id for protocol like ftp */
+    int64_t parent_id;
 
 #ifdef FLOWLOCK_RWLOCK
     SCRWLock r;

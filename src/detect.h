@@ -31,6 +31,7 @@
 #include "detect-engine-proto.h"
 #include "detect-reference.h"
 #include "detect-metadata.h"
+#include "detect-engine-register.h"
 #include "packet-queue.h"
 
 #include "util-prefilter.h"
@@ -212,62 +213,72 @@ typedef struct DetectPort_ {
 } DetectPort;
 
 /* Signature flags */
-#define SIG_FLAG_SRC_ANY                (1)  /**< source is any */
-#define SIG_FLAG_DST_ANY                (1<<1)  /**< destination is any */
-#define SIG_FLAG_SP_ANY                 (1<<2)  /**< source port is any */
-#define SIG_FLAG_DP_ANY                 (1<<3)  /**< destination port is any */
+/** \note: additions should be added to the rule analyzer as well */
 
-#define SIG_FLAG_NOALERT                (1<<4)  /**< no alert flag is set */
-#define SIG_FLAG_DSIZE                  (1<<5)  /**< signature has a dsize setting */
-#define SIG_FLAG_APPLAYER               (1<<6)  /**< signature applies to app layer instead of packets */
-#define SIG_FLAG_IPONLY                 (1<<7) /**< ip only signature */
+#define SIG_FLAG_SRC_ANY                BIT_U32(0)  /**< source is any */
+#define SIG_FLAG_DST_ANY                BIT_U32(1)  /**< destination is any */
+#define SIG_FLAG_SP_ANY                 BIT_U32(2)  /**< source port is any */
+#define SIG_FLAG_DP_ANY                 BIT_U32(3)  /**< destination port is any */
 
-#define SIG_FLAG_STATE_MATCH            (1<<8) /**< signature has matches that require stateful inspection */
+#define SIG_FLAG_NOALERT                BIT_U32(4)  /**< no alert flag is set */
+#define SIG_FLAG_DSIZE                  BIT_U32(5)  /**< signature has a dsize setting */
+#define SIG_FLAG_APPLAYER               BIT_U32(6)  /**< signature applies to app layer instead of packets */
+#define SIG_FLAG_IPONLY                 BIT_U32(7)  /**< ip only signature */
 
-#define SIG_FLAG_REQUIRE_PACKET         (1<<9) /**< signature is requiring packet match */
-#define SIG_FLAG_REQUIRE_STREAM         (1<<10) /**< signature is requiring stream match */
+// vacancy
 
-#define SIG_FLAG_MPM_NEG                (1<<11)
+#define SIG_FLAG_REQUIRE_PACKET         BIT_U32(9)  /**< signature is requiring packet match */
+#define SIG_FLAG_REQUIRE_STREAM         BIT_U32(10) /**< signature is requiring stream match */
 
-#define SIG_FLAG_REQUIRE_FLOWVAR        (1<<17) /**< signature can only match if a flowbit, flowvar or flowint is available. */
+#define SIG_FLAG_MPM_NEG                BIT_U32(11)
 
-#define SIG_FLAG_FILESTORE              (1<<18) /**< signature has filestore keyword */
+#define SIG_FLAG_FLUSH                  BIT_U32(12) /**< detection logic needs stream flush notification */
 
-#define SIG_FLAG_TOSERVER               (1<<19)
-#define SIG_FLAG_TOCLIENT               (1<<20)
+// vacancies
 
-#define SIG_FLAG_TLSSTORE               (1<<21)
+#define SIG_FLAG_REQUIRE_FLOWVAR        BIT_U32(17) /**< signature can only match if a flowbit, flowvar or flowint is available. */
 
-#define SIG_FLAG_BYPASS                (1<<22)
+#define SIG_FLAG_FILESTORE              BIT_U32(18) /**< signature has filestore keyword */
 
-#define SIG_FLAG_PREFILTER              (1<<23) /**< sig is part of a prefilter engine */
+#define SIG_FLAG_TOSERVER               BIT_U32(19)
+#define SIG_FLAG_TOCLIENT               BIT_U32(20)
+
+#define SIG_FLAG_TLSSTORE               BIT_U32(21)
+
+#define SIG_FLAG_BYPASS                 BIT_U32(22)
+
+#define SIG_FLAG_PREFILTER              BIT_U32(23) /**< sig is part of a prefilter engine */
 
 /** Proto detect only signature.
  *  Inspected once per direction when protocol detection is done. */
-#define SIG_FLAG_PDONLY                 (1<<24)
+#define SIG_FLAG_PDONLY                 BIT_U32(24)
 /** Info for Source and Target identification */
-#define SIG_FLAG_SRC_IS_TARGET          (1<<25)
+#define SIG_FLAG_SRC_IS_TARGET          BIT_U32(25)
 /** Info for Source and Target identification */
-#define SIG_FLAG_DEST_IS_TARGET         (1<<26)
+#define SIG_FLAG_DEST_IS_TARGET         BIT_U32(26)
 
-#define SIG_FLAG_HAS_TARGET     (SIG_FLAG_DEST_IS_TARGET|SIG_FLAG_SRC_IS_TARGET)
+#define SIG_FLAG_HAS_TARGET             (SIG_FLAG_DEST_IS_TARGET|SIG_FLAG_SRC_IS_TARGET)
 
 /* signature init flags */
-#define SIG_FLAG_INIT_DEONLY         1  /**< decode event only signature */
-#define SIG_FLAG_INIT_PACKET         (1<<1)  /**< signature has matches against a packet (as opposed to app layer) */
-#define SIG_FLAG_INIT_FLOW           (1<<2)  /**< signature has a flow setting */
-#define SIG_FLAG_INIT_BIDIREC        (1<<3)  /**< signature has bidirectional operator */
-#define SIG_FLAG_INIT_FIRST_IPPROTO_SEEN (1 << 4) /** < signature has seen the first ip_proto keyword */
-#define SIG_FLAG_INIT_HAS_TRANSFORM (1<<5)
+#define SIG_FLAG_INIT_DEONLY                (1<<0)  /**< decode event only signature */
+#define SIG_FLAG_INIT_PACKET                (1<<1)  /**< signature has matches against a packet (as opposed to app layer) */
+#define SIG_FLAG_INIT_FLOW                  (1<<2)  /**< signature has a flow setting */
+#define SIG_FLAG_INIT_BIDIREC               (1<<3)  /**< signature has bidirectional operator */
+#define SIG_FLAG_INIT_FIRST_IPPROTO_SEEN    (1<<4)  /** < signature has seen the first ip_proto keyword */
+#define SIG_FLAG_INIT_HAS_TRANSFORM         (1<<5)
+#define SIG_FLAG_INIT_STATE_MATCH           (1<<6)  /**< signature has matches that require stateful inspection */
+#define SIG_FLAG_INIT_NEED_FLUSH            (1<<7)
 
 /* signature mask flags */
-#define SIG_MASK_REQUIRE_PAYLOAD            (1<<0)
-#define SIG_MASK_REQUIRE_FLOW               (1<<1)
-#define SIG_MASK_REQUIRE_FLAGS_INITDEINIT   (1<<2)    /* SYN, FIN, RST */
-#define SIG_MASK_REQUIRE_FLAGS_UNUSUAL      (1<<3)    /* URG, ECN, CWR */
-#define SIG_MASK_REQUIRE_NO_PAYLOAD         (1<<4)
-//
-#define SIG_MASK_REQUIRE_ENGINE_EVENT       (1<<7)
+/** \note: additions should be added to the rule analyzer as well */
+#define SIG_MASK_REQUIRE_PAYLOAD            BIT_U8(0)
+#define SIG_MASK_REQUIRE_FLOW               BIT_U8(1)
+#define SIG_MASK_REQUIRE_FLAGS_INITDEINIT   BIT_U8(2)    /* SYN, FIN, RST */
+#define SIG_MASK_REQUIRE_FLAGS_UNUSUAL      BIT_U8(3)    /* URG, ECN, CWR */
+#define SIG_MASK_REQUIRE_NO_PAYLOAD         BIT_U8(4)
+#define SIG_MASK_REQUIRE_DCERPC             BIT_U8(5)    /* require either SMB+DCE or raw DCE */
+// vacancy
+#define SIG_MASK_REQUIRE_ENGINE_EVENT       BIT_U8(7)
 
 /* for now a uint8_t is enough */
 #define SignatureMask uint8_t
@@ -477,8 +488,8 @@ typedef struct SignatureInitData_ {
 
 /** \brief Signature container */
 typedef struct Signature_ {
-    /* coccinelle: Signature:flags:SIG_FLAG */
     uint32_t flags;
+    /* coccinelle: Signature:flags:SIG_FLAG_ */
 
     AppProto alproto;
 
@@ -886,6 +897,11 @@ typedef struct DetectEngineCtx_ {
 
     /** signatures stats */
     SigFileLoaderStat sig_stat;
+
+    /** per keyword flag indicating if a prefilter has been
+     *  set for it. If true, the setup function will have to
+     *  run. */
+    bool sm_types_prefilter[DETECT_TBLSIZE];
 
 } DetectEngineCtx;
 
@@ -1325,6 +1341,7 @@ enum DetectEngineTenantSelectors
     TENANT_SELECTOR_UNKNOWN = 0,    /**< not set */
     TENANT_SELECTOR_DIRECT,         /**< method provides direct tenant id */
     TENANT_SELECTOR_VLAN,           /**< map vlan to tenant id */
+    TENANT_SELECTOR_LIVEDEV,        /**< map livedev to tenant id */
 };
 
 typedef struct DetectEngineTenantMapping_ {
@@ -1366,6 +1383,9 @@ typedef struct DetectEngineMasterCtx_ {
     DetectEngineThreadKeywordCtxItem *keyword_list;
     int keyword_id;
 } DetectEngineMasterCtx;
+
+/* Table with all SigMatch registrations */
+SigTableElmt sigmatch_table[DETECT_TBLSIZE];
 
 /** Remember to add the options in SignatureIsIPOnly() at detect.c otherwise it wont be part of a signature group */
 
