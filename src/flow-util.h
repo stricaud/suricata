@@ -70,6 +70,7 @@
         (f)->hprev = NULL; \
         (f)->lnext = NULL; \
         (f)->lprev = NULL; \
+	(f)->has_seen_response = 0; \
         RESET_COUNTERS((f)); \
     } while (0)
 

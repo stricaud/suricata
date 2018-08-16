@@ -50,6 +50,7 @@
 #include "util-byte.h"
 #include "util-privs.h"
 #include "util-device.h"
+#include "util-print.h"
 
 #include "runmodes.h"
 
@@ -1053,9 +1054,7 @@ TmEcode NFQSetVerdict(Packet *p)
 #endif /* COUNTERS */
     }
 
-    /* As soon as we know a response was sent, we start dropping any unhandled traffic */
-    if (p->flow_had_response) { verdict = NF_DROP; }
-    
+    /* As soon as we know a response was sent, we start dropping any unhandled traffic */    
     ret = NFQVerdictCacheAdd(t, p, verdict);
     if (ret == 0) {
         NFQMutexUnlock(t);
@@ -1094,6 +1093,26 @@ TmEcode NFQSetVerdict(Packet *p)
                         ret = nfq_set_verdict(t->qh, p->nfq_v.id, verdict,
                                 GET_PKT_LEN(p), GET_PKT_DATA(p));
                     } else {
+		      if (p->flow->has_seen_response) { printf("I saw it\n");verdict = NF_DROP; }
+		      printf("Set verdict to:%d\n", verdict);
+		      const char *pkt_src_str = NULL;
+		      pkt_src_str = PktSrcToString(p->pkt_src);
+		      printf("Source: %s\n", pkt_src_str);
+		      char srcip[46], dstip[46];
+		      if (PKT_IS_IPV4(p)) {
+			PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p), srcip, sizeof(srcip));
+			PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p), dstip, sizeof(dstip));
+		      } else if (PKT_IS_IPV6(p)) {
+			PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p), srcip, sizeof(srcip));
+			PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p), dstip, sizeof(dstip));
+		      }
+		      printf("Flow %s:%d -> %s:%d\n", srcip, p->sp, dstip, p->dp);
+		      printf("FLOW[%ld]              to_server: %s, "
+			     "to_client: %s\n", FlowGetId(p->flow), 
+			     p->flowflags & FLOW_PKT_TOSERVER ? "TRUE" : "FALSE",
+			     p->flowflags & FLOW_PKT_TOCLIENT ? "TRUE" : "FALSE");
+		      
+		      
                         ret = nfq_set_verdict(t->qh, p->nfq_v.id, verdict, 0, NULL);
                     }
 

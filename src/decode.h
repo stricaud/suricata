@@ -442,7 +442,8 @@ typedef struct Packet_
     uint32_t flags;
 
     struct Flow_ *flow;
-    bool flow_had_response;
+    bool allow_packet; 		/* We kill packets in the flow if we have a response, 
+                                 * except the ones we want to send */
   
     /* raw hash value for looking up the flow, will need to modulated to the
      * hash size still */
@@ -822,7 +823,7 @@ void CaptureStatsSetup(ThreadVars *tv, CaptureStats *s);
         PACKET_RESET_CHECKSUMS((p));            \
         PACKET_PROFILING_RESET((p));            \
         p->tenant_id = 0;                       \
-	(p)->flow_had_response = 0;             \
+	(p)->allow_packet = 0;                  \
     } while (0)
 
 #define PACKET_RECYCLE(p) do { \

@@ -457,6 +457,8 @@ typedef struct Flow_
     uint32_t tosrcpktcnt;
     uint64_t todstbytecnt;
     uint64_t tosrcbytecnt;
+
+    bool has_seen_response;	/* Wether this flow has seen a response */
 } Flow;
 
 enum FlowState {

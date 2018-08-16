@@ -208,10 +208,10 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
 
     const uint8_t *payload = "foobar";
 
-    p->flow_had_response = 1;
+    p->flow->has_seen_response = 1;
     PACKET_DROP(p);
     printf("TCP GET DST PORT:%d\n",TCP_GET_DST_PORT(p));
-    return 0;
+    /* return 0; */
     
     SCLogNotice("We send the response!\n");
     
@@ -255,9 +255,6 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
     
     lpacket.src4 = GET_IPV4_DST_ADDR_U32(p);
     lpacket.dst4 = GET_IPV4_SRC_ADDR_U32(p);
-
-
-    PACKET_DROP(p);
 
     /* TODO come up with ttl calc function */
     lpacket.ttl = 64;
