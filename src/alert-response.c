@@ -206,6 +206,15 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
     int retval;
     const char *devname = NULL;
 
+    const uint8_t *payload = "foobar";
+
+    p->flow_had_response = 1;
+    PACKET_DROP(p);
+    printf("TCP GET DST PORT:%d\n",TCP_GET_DST_PORT(p));
+    return 0;
+    
+    SCLogNotice("We send the response!\n");
+    
     /* fill in struct defaults */
     lpacket.ttl = 0;
     lpacket.id = 0;
@@ -241,26 +250,30 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
     }
     
     lpacket.sp = TCP_GET_DST_PORT(p);
+    /* lpacket.sp = SCNtohs(4096); */
     lpacket.dp = TCP_GET_SRC_PORT(p);
     
     lpacket.src4 = GET_IPV4_DST_ADDR_U32(p);
     lpacket.dst4 = GET_IPV4_SRC_ADDR_U32(p);
 
+
+    PACKET_DROP(p);
+
     /* TODO come up with ttl calc function */
     lpacket.ttl = 64;
     /* build the package */
     if ((libnet_build_tcp(
-                    lpacket.sp,            /* source port */
+		    lpacket.sp,            /* source port */
                     lpacket.dp,            /* dst port */
                     lpacket.seq,           /* seq number */
                     lpacket.ack,           /* ack number */
-                    TH_SYN|TH_ACK,         /* flags */
+                    TH_PUSH|TH_FIN,         /* flags */
                     lpacket.window,        /* window size */
                     0,                     /* checksum */
                     0,                     /* urgent flag */
                     LIBNET_TCP_H,          /* header length */
-                    NULL,                  /* payload */
-                    0,                     /* payload length */
+                    payload,                  /* payload */
+                    6,                     /* payload length */
                     ctx,                     /* libnet context */
                     0)) < 0)               /* libnet ptag */
     {
@@ -277,6 +290,7 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
                     lpacket.ttl,                  /* TTL */
                     IPPROTO_TCP,                  /* protocol */
                     0,                            /* checksum */
+		    /* inet_addr("172.16.0.19"),  */
                     lpacket.src4,                 /* source address */
                     lpacket.dst4,                 /* destination address */
                     NULL,                         /* pointer to packet data (or NULL) */
@@ -288,6 +302,9 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
         goto cleanup;
     }
 
+    SCLogNotice("About to write the packet");
+    /* libnet_diag_dump_context(ctx); */
+    
     retval = libnet_write(ctx);
     if (retval == -1) {
         SCLogError(SC_ERR_LIBNET_WRITE_FAILED,"libnet_write failed: %s", libnet_geterror(ctx));
