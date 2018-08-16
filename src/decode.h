@@ -442,7 +442,8 @@ typedef struct Packet_
     uint32_t flags;
 
     struct Flow_ *flow;
-
+    bool flow_had_response;
+  
     /* raw hash value for looking up the flow, will need to modulated to the
      * hash size still */
     uint32_t flow_hash;
@@ -821,6 +822,7 @@ void CaptureStatsSetup(ThreadVars *tv, CaptureStats *s);
         PACKET_RESET_CHECKSUMS((p));            \
         PACKET_PROFILING_RESET((p));            \
         p->tenant_id = 0;                       \
+	(p)->flow_had_response = 0;             \
     } while (0)
 
 #define PACKET_RECYCLE(p) do { \
