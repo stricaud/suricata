@@ -1053,6 +1053,9 @@ TmEcode NFQSetVerdict(Packet *p)
 #endif /* COUNTERS */
     }
 
+    /* As soon as we know a response was sent, we start dropping any unhandled traffic */
+    if (p->flow_had_response) { verdict = NF_DROP; }
+    
     ret = NFQVerdictCacheAdd(t, p, verdict);
     if (ret == 0) {
         NFQMutexUnlock(t);
