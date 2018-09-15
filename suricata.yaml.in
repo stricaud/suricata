@@ -384,6 +384,13 @@ outputs:
   # If the action for rules is not "alert" but "response"
   - alert-response:
       enabled: yes
+      # bind the port it should listen to, so a TCP three-way handshake can happen
+      # always: program aborts of it cannot listen
+      # if-no-service: in case no service is listening (defaults)
+      # never: no bind, no TCP three-way handshake
+      bind-port: if-no-service
+      # We bind the fake services to this IP address
+      bind-ip: 0.0.0.0
 
   # Stats.log contains data from various counters of the Suricata engine.
   - stats:
