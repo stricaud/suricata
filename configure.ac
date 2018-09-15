@@ -133,6 +133,7 @@
     AC_CHECK_HEADERS([sys/resource.h sys/types.h sys/un.h])
     AC_CHECK_HEADERS([sys/random.h])
     AC_CHECK_HEADERS([utime.h])
+    AC_CHECK_HEADERS([libgen.h])
 
     AC_CHECK_HEADERS([sys/socket.h net/if.h sys/mman.h linux/if_arp.h], [], [],
     [[#ifdef HAVE_SYS_SOCKET_H
@@ -801,7 +802,8 @@
         echo "   or your distribution:"
         echo
         echo "   Ubuntu: apt-get install libyaml-dev"
-        echo "   Fedora: yum install libyaml-devel"
+        echo "   Fedora: dnf install libyaml-devel"
+        echo "   CentOS/RHEL: yum install libyaml-devel"
         echo
         exit 1
     fi
@@ -1258,7 +1260,8 @@
         echo "   from http://www.tcpdump.org or your distribution:"
         echo
         echo "   Ubuntu: apt-get install libpcap-dev"
-        echo "   Fedora: yum install libpcap-devel"
+        echo "   Fedora: dnf install libpcap-devel"
+        echo "   CentOS/RHEL: yum install libpcap-devel"
         echo
         exit 1
     fi
@@ -1275,7 +1278,8 @@
         echo "   go get it from http://www.tcpdump.org or your distribution:"
         echo
         echo "   Ubuntu: apt-get install libpcap-dev"
-        echo "   Fedora: yum install libpcap-devel"
+        echo "   Fedora: dnf install libpcap-devel"
+        echo "   CentOS/RHEL: yum install libpcap-devel"
         echo
         exit 1
     fi
@@ -1559,7 +1563,8 @@
         echo "   or your distribution:"
         echo
         echo "   Ubuntu: apt-get install libcap-ng-dev"
-        echo "   Fedora: yum install libcap-ng-devel"
+        echo "   Fedora: dnf install libcap-ng-devel"
+        echo "   CentOS/RHEL: yum install libcap-ng-devel"
         echo
         echo "   Suricata will be built without support for dropping privs."
         echo
@@ -1676,7 +1681,8 @@
               echo "   from Mozilla or your distribution:"
               echo
               echo "   Ubuntu: apt-get install libnspr4-dev"
-              echo "   Fedora: yum install nspr-devel"
+              echo "   Fedora: dnf install nspr-devel"
+              echo "   CentOS/RHEL: yum install nspr-devel"
               echo
               exit 1
           fi
@@ -1720,7 +1726,8 @@
               echo "   from Mozilla or your distribution:"
               echo
               echo "   Ubuntu: apt-get install libnss3-dev"
-              echo "   Fedora: yum install nss-devel"
+              echo "   Fedora: dnf install nss-devel"
+              echo "   CentOS/RHEL: yum install nss-devel"
               echo
               exit 1
           fi
@@ -1764,7 +1771,8 @@
             echo "   from http://www.darwinsys.com/file/ or your distribution:"
             echo
             echo "   Ubuntu: apt-get install libmagic-dev"
-            echo "   Fedora: yum install file-devel"
+            echo "   Fedora: dnf install file-devel"
+            echo "   CentOS/RHEL: yum install file-devel"
             echo
             enable_magic="no"
         fi
@@ -1857,7 +1865,8 @@
                     echo "   from http://lua.org/index.html or your distribution:"
                     echo
                     echo "   Ubuntu: apt-get install liblua5.1-dev"
-                    echo "   CentOS/Fedora: yum install lua-devel"
+                    echo "   Fedora: dnf install lua-devel"
+                    echo "   CentOS/RHEL: yum install lua-devel"
                     echo
                     echo "   If you installed software in a non-standard prefix"
                     echo "   consider adjusting the PKG_CONFIG_PATH environment variable"
@@ -1893,7 +1902,8 @@
                 echo "   from http://lua.org/index.html or your distribution:"
                 echo
                 echo "   Ubuntu: apt-get install liblua5.1-dev"
-                echo "   CentOS/Fedora: yum install lua-devel"
+                echo "   Fedora: dnf install lua-devel"
+                echo "   CentOS/RHEL: yum install lua-devel"
                 echo
                 echo "   If you installed software in a non-standard prefix"
                 echo "   consider adjusting the PKG_CONFIG_PATH environment variable"
@@ -1997,7 +2007,8 @@
             echo "   from http://www.maxmind.com/en/geolite or your distribution:"
             echo
             echo "   Ubuntu: apt-get install libgeoip-dev"
-            echo "   Fedora: yum install GeoIP-devel"
+            echo "   Fedora: dnf install GeoIP-devel"
+            echo "   CentOS/RHEL: yum install GeoIP-devel"
             echo
             exit 1
         fi
@@ -2056,7 +2067,7 @@
             echo
             echo "   Ubuntu: apt-get install libhiredis-dev"
             echo "   Fedora: dnf install hiredis-devel"
-            echo "   RHEL/CentOS: yum install hiredis-devel"
+            echo "   CentOS/RHEL: yum install hiredis-devel"
             echo
             exit 1
         fi
@@ -2088,7 +2099,7 @@
                         echo
                         echo "   Ubuntu: apt-get install libevent-dev"
                         echo "   Fedora: dnf install libevent-devel"
-                        echo "   RHEL/CentOS: yum install libevent-devel"
+                        echo "   CentOS/RHEL: yum install libevent-devel"
                         echo
                    fi
                    if test "$HAVE_LIBEVENT_PTHREADS" = "no"; then
@@ -2118,7 +2129,7 @@ if test "$enable_liblz4" = "no"; then
     echo
     echo "  Ubuntu: apt-get install liblz4-dev"
     echo "  Fedora: dnf install lz4-devel"
-    echo "  RHEL/CentOS: yum install epel-release"
+    echo "  CentOS/RHEL: yum install epel-release"
     echo "               yum install lz4-devel"
     echo
 fi
@@ -2168,7 +2179,11 @@ fi
       # Rust require jansson (json support).
       if test "x$enable_jansson" = "xno"; then
         echo ""
-        echo "   ERROR! Rust support requires jansson."
+        echo "   ERROR! Rust support requires libjansson."
+        echo
+        echo "   Ubuntu: apt-get install libjansson-dev"
+        echo "   Fedora: dnf install jansson-devel"
+        echo "   CentOS/RHEL: yum install jansson-devel"
         echo ""
         exit 1
       fi
@@ -2181,12 +2196,20 @@ fi
       if test "x$HAVE_CARGO" = "xno"; then
         echo ""
         echo "   ERROR! Rust support requested but cargo not found."
+        echo
+        echo "   Ubuntu: apt-get install cargo"
+        echo "   Fedora: dnf install cargo"
+        echo "   CentOS/RHEL: yum install cargo"
         echo ""
         exit 1
       fi
       if test "x$HAVE_RUST" = "xno"; then
         echo ""
         echo "   ERROR! Rust support requested but rustc not found."
+        echo
+        echo "   Ubuntu: apt-get install rustc"
+        echo "   Fedora: dnf install rust"
+        echo "   CentOS/RHEL: yum install rust"
         echo ""
         exit 1
       fi

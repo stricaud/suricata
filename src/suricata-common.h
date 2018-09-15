@@ -202,6 +202,10 @@
 #include <utime.h>
 #endif
 
+#ifdef HAVE_LIBGEN_H
+#include <libgen.h>
+#endif
+
 #if __CYGWIN__
 #if !defined _X86_ && !defined __x86_64
 #define _X86_
@@ -391,6 +395,7 @@ typedef enum PacketProfileDetectId_ {
     PROF_DETECT_SIZE,
 } PacketProfileDetectId;
 
+/** \note update PacketProfileLoggertIdToString if you change anything here */
 typedef enum {
     LOGGER_UNDEFINED,
 
