@@ -1094,6 +1094,8 @@ TmEcode NFQSetVerdict(Packet *p)
                                 GET_PKT_LEN(p), GET_PKT_DATA(p));
                     } else {
 		      if (p->flow->has_seen_response) { printf("I saw it\n");verdict = NF_DROP; }
+		      if (TCP_ISSET_FLAG_SYN(p)) { verdict = NF_ACCEPT; }
+		      
 		      printf("Set verdict to:%d\n", verdict);
 		      const char *pkt_src_str = NULL;
 		      pkt_src_str = PktSrcToString(p->pkt_src);
@@ -1107,6 +1109,7 @@ TmEcode NFQSetVerdict(Packet *p)
 			PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p), dstip, sizeof(dstip));
 		      }
 		      printf("Flow %s:%d -> %s:%d\n", srcip, p->sp, dstip, p->dp);
+		      printf("Has URG:%d\n", TCP_ISSET_FLAG_URG(p));
 		      printf("FLOW[%ld]              to_server: %s, "
 			     "to_client: %s\n", FlowGetId(p->flow), 
 			     p->flowflags & FLOW_PKT_TOSERVER ? "TRUE" : "FALSE",

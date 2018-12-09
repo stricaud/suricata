@@ -15,6 +15,13 @@
  * 02110-1301, USA.
  */
 
+#ifndef OS_WIN32
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#endif
+
 #include "suricata-common.h"
 #include "detect.h"
 #include "detect-engine.h"
@@ -1270,6 +1277,45 @@ static DetectPort *RulesGroupByPorts(DetectEngineCtx *de_ctx, int ipproto, uint3
     return list;
 }
 
+static void *SigAddressListen(void *arg)
+{
+#ifndef OS_WIN32
+    uint16_t *port = (uint16_t *)arg;
+    int sockfd, newsockfd;
+    size_t client_len;
+    struct sockaddr_in server_addr, client_addr;
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        SCLogError(SC_ERR_SOCKET, "Error with socket()");
+	return NULL;
+    }
+    memset((char *) &server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(*port);
+    if (bind(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
+        SCLogError(SC_ERR_SOCKET, "Error with bind()");
+	return NULL;
+    }
+    listen(sockfd, 0);
+    client_len = sizeof(client_addr);
+    while (1) {
+      newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
+      if (newsockfd < 0) {
+        SCLogError(SC_ERR_SOCKET, "Error with accept()");
+	return NULL;
+      }
+    }
+#elif
+    SCLogError(SC_ERR_SOCKET, "Response port listening does not work on WIN32");
+#endif
+
+    close(sockfd);
+    close(newsockfd);
+    
+    return NULL;
+}
+
 /**
  * \brief Preprocess signature, classify ip-only, etc, build sig array
  *
@@ -1419,6 +1465,31 @@ int SigAddressPrepareStage1(DetectEngineCtx *de_ctx)
         de_ctx->sig_cnt++;
     }
 
+    printf("List of server ports for our response signatures:");
+    for (Signature *s = de_ctx->sig_list; s != NULL;) {
+        Signature *ns = s->next;
+
+	if (s->action == ACTION_RESPONSE) {
+	  printf("The sid:%d has a response\n", s->id);
+	  for (DetectPort *dest_ports = s->dp; dest_ports != NULL; dest_ports = dest_ports->next) {
+	    printf("Destination port:%d,2:%d\n", dest_ports->port, dest_ports->port2);
+	    if (dest_ports->port != dest_ports->port2) {
+	        SCLogWarning(SC_WARN_INVALID_RESPONSE_PORTS, "Signature ID %" PRIu32 ": Cannot create a fake server on multiple ports. Too generic. Response will still work, but not send SYN|ACK.", s->id);
+	    } else {
+#ifndef OS_WIN32
+		pthread_t thread_id;
+		pthread_create(&thread_id, NULL, SigAddressListen, (void *)&dest_ports->port);		
+#endif
+	    }
+	    
+	  }
+	}
+	
+        /* SigFree(s); */
+        s = ns;
+    }
+    
+    
     if (!(de_ctx->flags & DE_QUIET)) {
         SCLogInfo("%" PRIu32 " signatures processed. %" PRIu32 " are IP-only "
                 "rules, %" PRIu32 " are inspecting packet payload, %"PRIu32

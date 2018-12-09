@@ -206,7 +206,9 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
     int retval;
     const char *devname = NULL;
 
-    const uint8_t *payload = "foobar";
+    //char *payload = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>foobar</html>\r\n\r\n";
+    char *payload = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    u_short payload_size = strlen(payload);
 
     p->flow->has_seen_response = 1;
     PACKET_DROP(p);
@@ -234,7 +236,8 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
        return 1;
 
     /* save payload len */
-    lpacket.dsize = p->payload_len;
+    /* lpacket.dsize = p->payload_len; */
+    lpacket.dsize = 0;
     lpacket.window = TCP_GET_WINDOW(p);
     /* We follow http://tools.ietf.org/html/rfc793#section-3.4 :
      *  If packet has no ACK, the seq number is 0 and the ACK is built
@@ -250,7 +253,6 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
     }
     
     lpacket.sp = TCP_GET_DST_PORT(p);
-    /* lpacket.sp = SCNtohs(4096); */
     lpacket.dp = TCP_GET_SRC_PORT(p);
     
     lpacket.src4 = GET_IPV4_DST_ADDR_U32(p);
@@ -258,19 +260,20 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
 
     /* TODO come up with ttl calc function */
     lpacket.ttl = 64;
+
     /* build the package */
     if ((libnet_build_tcp(
 		    lpacket.sp,            /* source port */
                     lpacket.dp,            /* dst port */
                     lpacket.seq,           /* seq number */
                     lpacket.ack,           /* ack number */
-                    TH_PUSH|TH_FIN,         /* flags */
+                    TH_ACK,                /* flags */
                     lpacket.window,        /* window size */
                     0,                     /* checksum */
                     0,                     /* urgent flag */
                     LIBNET_TCP_H,          /* header length */
-                    payload,                  /* payload */
-                    6,                     /* payload length */
+                    NULL,                  /* payload */
+                    0,                     /* payload length */
                     ctx,                     /* libnet context */
                     0)) < 0)               /* libnet ptag */
     {
@@ -287,7 +290,6 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
                     lpacket.ttl,                  /* TTL */
                     IPPROTO_TCP,                  /* protocol */
                     0,                            /* checksum */
-		    /* inet_addr("172.16.0.19"),  */
                     lpacket.src4,                 /* source address */
                     lpacket.dst4,                 /* destination address */
                     NULL,                         /* pointer to packet data (or NULL) */
@@ -308,6 +310,56 @@ int ResponseLibnet11IPv4TCP(ThreadVars *tv, Packet *p, const PacketAlert *pa, vo
         goto cleanup;
     }
 
+    /* Packet number 2 */
+    if ((libnet_build_tcp(
+		    lpacket.sp,            /* source port */
+                    lpacket.dp,            /* dst port */
+                    lpacket.seq,           /* seq number */
+                    lpacket.ack,           /* ack number */
+                    TH_PUSH|TH_ACK,                /* flags */
+                    lpacket.window,        /* window size */
+                    0,                     /* checksum */
+                    0,                     /* urgent flag */
+                    LIBNET_TCP_H + 20 + payload_size,          /* header length */
+		    /* NULL, */
+		    /* 0, */
+                    (uint8_t *)payload,                  /* payload */
+                    payload_size,                     /* payload length */
+                    ctx,                     /* libnet context */
+                    0)) < 0)               /* libnet ptag */
+    {
+        SCLogError(SC_ERR_LIBNET_BUILD_FAILED,"libnet_build_tcp %s", libnet_geterror(ctx));
+        goto cleanup;
+    }
+    
+    if ((libnet_build_ipv4(
+                    LIBNET_TCP_H + LIBNET_IPV4_H, /* entire packet length */
+                    0,                            /* tos */
+                    lpacket.id,                   /* ID */
+                    0,                            /* fragmentation flags and offset */
+                    lpacket.ttl,                  /* TTL */
+                    IPPROTO_TCP,                  /* protocol */
+                    0,                            /* checksum */
+                    lpacket.src4,                 /* source address */
+                    lpacket.dst4,                 /* destination address */
+                    NULL,                         /* pointer to packet data (or NULL) */
+                    0,                            /* payload length */
+                    ctx,                            /* libnet context pointer */
+                    0)) < 0)                      /* packet id */
+    {
+        SCLogError(SC_ERR_LIBNET_BUILD_FAILED,"libnet_build_ipv4 %s", libnet_geterror(ctx));
+        goto cleanup;
+    }
+
+    SCLogNotice("About to write the packet");
+    /* libnet_diag_dump_context(ctx); */
+    
+    retval = libnet_write(ctx);
+    if (retval == -1) {
+        SCLogError(SC_ERR_LIBNET_WRITE_FAILED,"libnet_write failed: %s", libnet_geterror(ctx));
+        goto cleanup;
+    }    
+    
 cleanup:
     libnet_destroy (ctx);
     return 0;    
