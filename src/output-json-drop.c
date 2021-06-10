@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2013 Open Information Security Foundation
+/* Copyright (C) 2007-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -58,19 +58,16 @@
 
 #define MODULE_NAME "JsonDropLog"
 
-#ifdef HAVE_LIBJANSSON
-
 #define LOG_DROP_ALERTS 1
 
 typedef struct JsonDropOutputCtx_ {
-    LogFileCtx *file_ctx;
     uint8_t flags;
-    OutputJsonCommonSettings cfg;
+    OutputJsonCtx *eve_ctx;
 } JsonDropOutputCtx;
 
 typedef struct JsonDropLogThread_ {
     JsonDropOutputCtx *drop_ctx;
-    MemBuffer *buffer;
+    OutputJsonThreadCtx *ctx;
 } JsonDropLogThread;
 
 /* default to true as this has been the default behavior for a long time */
@@ -89,67 +86,63 @@ static int DropLogJSON (JsonDropLogThread *aft, const Packet *p)
 {
     JsonDropOutputCtx *drop_ctx = aft->drop_ctx;
 
-    json_t *js = CreateJSONHeader(p, LOG_DIR_PACKET, "drop");
+    JsonAddrInfo addr = json_addr_info_zero;
+    JsonAddrInfoInit(p, LOG_DIR_PACKET, &addr);
+
+    JsonBuilder *js = CreateEveHeader(p, LOG_DIR_PACKET, "drop", &addr, drop_ctx->eve_ctx);
     if (unlikely(js == NULL))
         return TM_ECODE_OK;
 
-    JsonAddCommonOptions(&drop_ctx->cfg, p, p->flow, js);
-
-    json_t *djs = json_object();
-    if (unlikely(djs == NULL)) {
-        json_decref(js);
-        return TM_ECODE_OK;
-    }
-
-    /* reset */
-    MemBufferReset(aft->buffer);
+    jb_open_object(js, "drop");
 
     uint16_t proto = 0;
     if (PKT_IS_IPV4(p)) {
-        json_object_set_new(djs, "len", json_integer(IPV4_GET_IPLEN(p)));
-        json_object_set_new(djs, "tos", json_integer(IPV4_GET_IPTOS(p)));
-        json_object_set_new(djs, "ttl", json_integer(IPV4_GET_IPTTL(p)));
-        json_object_set_new(djs, "ipid", json_integer(IPV4_GET_IPID(p)));
+        jb_set_uint(js, "len", IPV4_GET_IPLEN(p));
+        jb_set_uint(js, "tos", IPV4_GET_IPTOS(p));
+        jb_set_uint(js, "ttl", IPV4_GET_IPTTL(p));
+        jb_set_uint(js, "ipid", IPV4_GET_IPID(p));
         proto = IPV4_GET_IPPROTO(p);
     } else if (PKT_IS_IPV6(p)) {
-        json_object_set_new(djs, "len", json_integer(IPV6_GET_PLEN(p)));
-        json_object_set_new(djs, "tc", json_integer(IPV6_GET_CLASS(p)));
-        json_object_set_new(djs, "hoplimit", json_integer(IPV6_GET_HLIM(p)));
-        json_object_set_new(djs, "flowlbl", json_integer(IPV6_GET_FLOW(p)));
+        jb_set_uint(js, "len", IPV6_GET_PLEN(p));
+        jb_set_uint(js, "tc", IPV6_GET_CLASS(p));
+        jb_set_uint(js, "hoplimit", IPV6_GET_HLIM(p));
+        jb_set_uint(js, "flowlbl", IPV6_GET_FLOW(p));
         proto = IPV6_GET_L4PROTO(p);
     }
     switch (proto) {
         case IPPROTO_TCP:
             if (PKT_IS_TCP(p)) {
-                json_object_set_new(djs, "tcpseq", json_integer(TCP_GET_SEQ(p)));
-                json_object_set_new(djs, "tcpack", json_integer(TCP_GET_ACK(p)));
-                json_object_set_new(djs, "tcpwin", json_integer(TCP_GET_WINDOW(p)));
-                json_object_set_new(djs, "syn", TCP_ISSET_FLAG_SYN(p) ? json_true() : json_false());
-                json_object_set_new(djs, "ack", TCP_ISSET_FLAG_ACK(p) ? json_true() : json_false());
-                json_object_set_new(djs, "psh", TCP_ISSET_FLAG_PUSH(p) ? json_true() : json_false());
-                json_object_set_new(djs, "rst", TCP_ISSET_FLAG_RST(p) ? json_true() : json_false());
-                json_object_set_new(djs, "urg", TCP_ISSET_FLAG_URG(p) ? json_true() : json_false());
-                json_object_set_new(djs, "fin", TCP_ISSET_FLAG_FIN(p) ? json_true() : json_false());
-                json_object_set_new(djs, "tcpres", json_integer(TCP_GET_RAW_X2(p->tcph)));
-                json_object_set_new(djs, "tcpurgp", json_integer(TCP_GET_URG_POINTER(p)));
+                jb_set_uint(js, "tcpseq", TCP_GET_SEQ(p));
+                jb_set_uint(js, "tcpack", TCP_GET_ACK(p));
+                jb_set_uint(js, "tcpwin", TCP_GET_WINDOW(p));
+                jb_set_bool(js, "syn", TCP_ISSET_FLAG_SYN(p) ? true : false);
+                jb_set_bool(js, "ack", TCP_ISSET_FLAG_ACK(p) ? true : false);
+                jb_set_bool(js, "psh", TCP_ISSET_FLAG_PUSH(p) ? true : false);
+                jb_set_bool(js, "rst", TCP_ISSET_FLAG_RST(p) ? true : false);
+                jb_set_bool(js, "urg", TCP_ISSET_FLAG_URG(p) ? true : false);
+                jb_set_bool(js, "fin", TCP_ISSET_FLAG_FIN(p) ? true : false);
+                jb_set_uint(js, "tcpres",  TCP_GET_RAW_X2(p->tcph));
+                jb_set_uint(js, "tcpurgp", TCP_GET_URG_POINTER(p));
             }
             break;
         case IPPROTO_UDP:
             if (PKT_IS_UDP(p)) {
-                json_object_set_new(djs, "udplen", json_integer(UDP_GET_LEN(p)));
+                jb_set_uint(js, "udplen", UDP_GET_LEN(p));
             }
             break;
         case IPPROTO_ICMP:
             if (PKT_IS_ICMPV4(p)) {
-                json_object_set_new(djs, "icmp_id", json_integer(ICMPV4_GET_ID(p)));
-                json_object_set_new(djs, "icmp_seq", json_integer(ICMPV4_GET_SEQ(p)));
+                jb_set_uint(js, "icmp_id", ICMPV4_GET_ID(p));
+                jb_set_uint(js, "icmp_seq", ICMPV4_GET_SEQ(p));
             } else if(PKT_IS_ICMPV6(p)) {
-                json_object_set_new(djs, "icmp_id", json_integer(ICMPV6_GET_ID(p)));
-                json_object_set_new(djs, "icmp_seq", json_integer(ICMPV6_GET_SEQ(p)));
+                jb_set_uint(js, "icmp_id", ICMPV6_GET_ID(p));
+                jb_set_uint(js, "icmp_seq", ICMPV6_GET_SEQ(p));
             }
             break;
     }
-    json_object_set_new(js, "drop", djs);
+
+    /* Close drop. */
+    jb_close(js);
 
     if (aft->drop_ctx->flags & LOG_DROP_ALERTS) {
         int logged = 0;
@@ -162,52 +155,50 @@ static int DropLogJSON (JsonDropLogThread *aft, const Packet *p)
             if ((pa->action & (ACTION_REJECT|ACTION_REJECT_DST|ACTION_REJECT_BOTH)) ||
                ((pa->action & ACTION_DROP) && EngineModeIsIPS()))
             {
-                AlertJsonHeader(NULL, p, pa, js, 0);
+                AlertJsonHeader(NULL, p, pa, js, 0, &addr);
                 logged = 1;
+                break;
             }
         }
         if (logged == 0) {
             if (p->alerts.drop.action != 0) {
                 const PacketAlert *pa = &p->alerts.drop;
-                AlertJsonHeader(NULL, p, pa, js, 0);
+                AlertJsonHeader(NULL, p, pa, js, 0, &addr);
             }
         }
     }
 
-    OutputJSONBuffer(js, aft->drop_ctx->file_ctx, &aft->buffer);
-    json_object_del(js, "drop");
-    json_object_clear(js);
-    json_decref(js);
+    OutputJsonBuilderBuffer(js, aft->ctx);
+    jb_free(js);
 
     return TM_ECODE_OK;
 }
 
-#define OUTPUT_BUFFER_SIZE 65535
 static TmEcode JsonDropLogThreadInit(ThreadVars *t, const void *initdata, void **data)
 {
-    JsonDropLogThread *aft = SCMalloc(sizeof(JsonDropLogThread));
+    JsonDropLogThread *aft = SCCalloc(1, sizeof(JsonDropLogThread));
     if (unlikely(aft == NULL))
         return TM_ECODE_FAILED;
-    memset(aft, 0, sizeof(*aft));
 
     if(initdata == NULL)
     {
         SCLogDebug("Error getting context for EveLogDrop.  \"initdata\" argument NULL");
-        SCFree(aft);
-        return TM_ECODE_FAILED;
-    }
-
-    aft->buffer = MemBufferCreateNew(OUTPUT_BUFFER_SIZE);
-    if (aft->buffer == NULL) {
-        SCFree(aft);
-        return TM_ECODE_FAILED;
+        goto error_exit;
     }
 
     /** Use the Ouptut Context (file pointer and mutex) */
     aft->drop_ctx = ((OutputCtx *)initdata)->data;
+    aft->ctx = CreateEveThreadCtx(t, aft->drop_ctx->eve_ctx);
+    if (!aft->ctx) {
+        goto error_exit;
+    }
 
     *data = (void *)aft;
     return TM_ECODE_OK;
+
+error_exit:
+    SCFree(aft);
+    return TM_ECODE_FAILED;
 }
 
 static TmEcode JsonDropLogThreadDeinit(ThreadVars *t, void *data)
@@ -217,7 +208,7 @@ static TmEcode JsonDropLogThreadDeinit(ThreadVars *t, void *data)
         return TM_ECODE_OK;
     }
 
-    MemBufferFree(aft->buffer);
+    FreeEveThreadCtx(aft->ctx);
 
     /* clear memory */
     memset(aft, 0, sizeof(*aft));
@@ -229,19 +220,8 @@ static TmEcode JsonDropLogThreadDeinit(ThreadVars *t, void *data)
 static void JsonDropOutputCtxFree(JsonDropOutputCtx *drop_ctx)
 {
     if (drop_ctx != NULL) {
-        if (drop_ctx->file_ctx != NULL)
-            LogFileFreeCtx(drop_ctx->file_ctx);
         SCFree(drop_ctx);
     }
-}
-
-static void JsonDropLogDeInitCtx(OutputCtx *output_ctx)
-{
-    OutputDropLoggerDisable();
-
-    JsonDropOutputCtx *drop_ctx = output_ctx->data;
-    JsonDropOutputCtxFree(drop_ctx);
-    SCFree(output_ctx);
 }
 
 static void JsonDropLogDeInitCtxSub(OutputCtx *output_ctx)
@@ -252,65 +232,6 @@ static void JsonDropLogDeInitCtxSub(OutputCtx *output_ctx)
     SCFree(drop_ctx);
     SCLogDebug("cleaning up sub output_ctx %p", output_ctx);
     SCFree(output_ctx);
-}
-
-#define DEFAULT_LOG_FILENAME "drop.json"
-static OutputInitResult JsonDropLogInitCtx(ConfNode *conf)
-{
-    OutputInitResult result = { NULL, false };
-    if (OutputDropLoggerEnable() != 0) {
-        SCLogError(SC_ERR_CONF_YAML_ERROR, "only one 'drop' logger "
-            "can be enabled");
-        return result;
-    }
-
-    JsonDropOutputCtx *drop_ctx = SCCalloc(1, sizeof(*drop_ctx));
-    if (drop_ctx == NULL)
-        return result;
-
-    drop_ctx->file_ctx = LogFileNewCtx();
-    if (drop_ctx->file_ctx == NULL) {
-        JsonDropOutputCtxFree(drop_ctx);
-        return result;
-    }
-
-    if (SCConfLogOpenGeneric(conf, drop_ctx->file_ctx, DEFAULT_LOG_FILENAME, 1) < 0) {
-        JsonDropOutputCtxFree(drop_ctx);
-        return result;
-    }
-
-    OutputCtx *output_ctx = SCCalloc(1, sizeof(OutputCtx));
-    if (unlikely(output_ctx == NULL)) {
-        JsonDropOutputCtxFree(drop_ctx);
-        return result;
-    }
-
-    if (conf) {
-        const char *extended = ConfNodeLookupChildValue(conf, "alerts");
-        if (extended != NULL) {
-            if (ConfValIsTrue(extended)) {
-                drop_ctx->flags = LOG_DROP_ALERTS;
-            }
-        }
-        extended = ConfNodeLookupChildValue(conf, "flows");
-        if (extended != NULL) {
-            if (strcasecmp(extended, "start") == 0) {
-                g_droplog_flows_start = 1;
-            } else if (strcasecmp(extended, "all") == 0) {
-                g_droplog_flows_start = 0;
-            } else {
-                SCLogWarning(SC_ERR_CONF_YAML_ERROR, "valid options for "
-                        "'flow' are 'start' and 'all'");
-            }
-        }
-    }
-
-    output_ctx->data = drop_ctx;
-    output_ctx->DeInit = JsonDropLogDeInitCtx;
-
-    result.ctx = output_ctx;
-    result.ok = true;
-    return result;
 }
 
 static OutputInitResult JsonDropLogInitCtxSub(ConfNode *conf, OutputCtx *parent_ctx)
@@ -354,8 +275,7 @@ static OutputInitResult JsonDropLogInitCtxSub(ConfNode *conf, OutputCtx *parent_
         }
     }
 
-    drop_ctx->file_ctx = ajt->file_ctx;
-    drop_ctx->cfg = ajt->cfg;
+    drop_ctx->eve_ctx = ajt;
 
     output_ctx->data = drop_ctx;
     output_ctx->DeInit = JsonDropLogDeInitCtxSub;
@@ -440,19 +360,8 @@ static int JsonDropLogCondition(ThreadVars *tv, const Packet *p)
 
 void JsonDropLogRegister (void)
 {
-    OutputRegisterPacketModule(LOGGER_JSON_DROP, MODULE_NAME, "drop-json-log",
-        JsonDropLogInitCtx, JsonDropLogger, JsonDropLogCondition,
-        JsonDropLogThreadInit, JsonDropLogThreadDeinit, NULL);
     OutputRegisterPacketSubModule(LOGGER_JSON_DROP, "eve-log", MODULE_NAME,
         "eve-log.drop", JsonDropLogInitCtxSub, JsonDropLogger,
         JsonDropLogCondition, JsonDropLogThreadInit, JsonDropLogThreadDeinit,
         NULL);
 }
-
-#else
-
-void JsonDropLogRegister (void)
-{
-}
-
-#endif

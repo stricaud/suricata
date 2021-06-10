@@ -32,34 +32,10 @@
 
 #include "detect-filesha256.h"
 
-#ifndef HAVE_NSS
-
-static int DetectFileSha256SetupNoSupport (DetectEngineCtx *a, Signature *b, const char *c)
-{
-    SCLogError(SC_ERR_NO_SHA256_SUPPORT, "no SHA-256 calculation support built in, needed for filesha256 keyword");
-    return -1;
-}
-
-/**
- * \brief Registration function for keyword: filesha256
- */
-void DetectFileSha256Register(void)
-{
-    sigmatch_table[DETECT_FILESHA256].name = "filesha256";
-    sigmatch_table[DETECT_FILESHA256].FileMatch = NULL;
-    sigmatch_table[DETECT_FILESHA256].Setup = DetectFileSha256SetupNoSupport;
-    sigmatch_table[DETECT_FILESHA256].Free  = NULL;
-    sigmatch_table[DETECT_FILESHA256].RegisterTests = NULL;
-    sigmatch_table[DETECT_FILESHA256].flags = SIGMATCH_NOT_BUILT;
-
-    SCLogDebug("registering filesha256 rule option");
-    return;
-}
-
-#else /* HAVE_NSS */
-
 static int DetectFileSha256Setup (DetectEngineCtx *, Signature *, const char *);
+#ifdef UNITTESTS
 static void DetectFileSha256RegisterTests(void);
+#endif
 static int g_file_match_list_id = 0;
 
 /**
@@ -69,11 +45,13 @@ void DetectFileSha256Register(void)
 {
     sigmatch_table[DETECT_FILESHA256].name = "filesha256";
     sigmatch_table[DETECT_FILESHA256].desc = "match file SHA-256 against list of SHA-256 checksums";
-    sigmatch_table[DETECT_FILESHA256].url = DOC_URL DOC_VERSION "/rules/file-keywords.html#filesha256";
+    sigmatch_table[DETECT_FILESHA256].url = "/rules/file-keywords.html#filesha256";
     sigmatch_table[DETECT_FILESHA256].FileMatch = DetectFileHashMatch;
     sigmatch_table[DETECT_FILESHA256].Setup = DetectFileSha256Setup;
     sigmatch_table[DETECT_FILESHA256].Free  = DetectFileHashFree;
+#ifdef UNITTESTS
     sigmatch_table[DETECT_FILESHA256].RegisterTests = DetectFileSha256RegisterTests;
+#endif
 
     g_file_match_list_id = DetectBufferTypeRegister("files");
 
@@ -153,13 +131,9 @@ static int SHA256MatchTest01(void)
     ROHashFree(hash);
     return 1;
 }
-#endif
 
 void DetectFileSha256RegisterTests(void)
 {
-#ifdef UNITTESTS
     UtRegisterTest("SHA256MatchTest01", SHA256MatchTest01);
-#endif
 }
-
-#endif /* HAVE_NSS */
+#endif

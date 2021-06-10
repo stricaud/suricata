@@ -28,6 +28,8 @@
 
 #include "queue.h"
 
+#include "rust.h"
+
 void RegisterTemplateParsers(void);
 void TemplateParserRegisterTests(void);
 
@@ -43,9 +45,6 @@ typedef struct TemplateTransaction
     uint8_t *request_buffer;
     uint32_t request_buffer_len;
 
-    /** flags indicating which loggers that have logged */
-    LoggerId logged;
-
     uint8_t *response_buffer;
     uint32_t response_buffer_len;
 
@@ -53,6 +52,8 @@ typedef struct TemplateTransaction
                             * seen. */
 
     DetectEngineState *de_state;
+
+    AppLayerTxData tx_data;
 
     TAILQ_ENTRY(TemplateTransaction) next;
 
@@ -65,7 +66,7 @@ typedef struct TemplateState {
     TAILQ_HEAD(, TemplateTransaction) tx_list;
 
     /** A count of the number of transactions created. The
-     *  transaction ID for each transaction is allocted
+     *  transaction ID for each transaction is allocated
      *  by incrementing this value. */
     uint64_t transaction_max;
 } TemplateState;

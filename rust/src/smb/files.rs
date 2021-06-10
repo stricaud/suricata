@@ -15,64 +15,30 @@
  * 02110-1301, USA.
  */
 
-use core::*;
-use log::*;
-use filetracker::*;
-use filecontainer::*;
+use crate::core::*;
+use crate::filetracker::*;
+use crate::filecontainer::*;
 
-use smb::smb::*;
+use crate::smb::smb::*;
 
 /// File tracking transaction. Single direction only.
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct SMBTransactionFile {
     pub direction: u8,
     pub fuid: Vec<u8>,
     pub file_name: Vec<u8>,
     pub share_name: Vec<u8>,
     pub file_tracker: FileTransferTracker,
+    /// after a gap, this will be set to a time in the future. If the file
+    /// receives no updates before that, it will be considered complete.
+    pub post_gap_ts: u64,
 }
 
 impl SMBTransactionFile {
-    pub fn new() -> SMBTransactionFile {
-        return SMBTransactionFile {
-            direction: 0,
-            fuid: Vec::new(),
-            file_name: Vec::new(),
-            share_name: Vec::new(),
+    pub fn new() -> Self {
+        return Self {
             file_tracker: FileTransferTracker::new(),
-        }
-    }
-}
-
-/// Wrapper around Suricata's internal file container logic.
-#[derive(Debug)]
-pub struct SMBFiles {
-    pub files_ts: FileContainer,
-    pub files_tc: FileContainer,
-    pub flags_ts: u16,
-    pub flags_tc: u16,
-}
-
-impl SMBFiles {
-    pub fn new() -> SMBFiles {
-        SMBFiles {
-            files_ts:FileContainer::default(),
-            files_tc:FileContainer::default(),
-            flags_ts:0,
-            flags_tc:0,
-        }
-    }
-    pub fn free(&mut self) {
-        self.files_ts.free();
-        self.files_tc.free();
-    }
-
-    pub fn get(&mut self, direction: u8) -> (&mut FileContainer, u16)
-    {
-        if direction == STREAM_TOSERVER {
-            (&mut self.files_ts, self.flags_ts)
-        } else {
-            (&mut self.files_tc, self.flags_tc)
+            ..Default::default()
         }
     }
 }
@@ -86,7 +52,7 @@ pub fn filetracker_newchunk(ft: &mut FileTransferTracker, files: &mut FileContai
         Some(sfcm) => {
             ft.new_chunk(sfcm, files, flags, &name, data, chunk_offset,
                     chunk_size, fill_bytes, is_last, xid); }
-        None => panic!("BUG"),
+        None => panic!("no SURICATA_SMB_FILE_CONFIG"),
     }
 }
 
@@ -199,6 +165,11 @@ impl SMBState {
                             SCLogDebug!("QUEUED size {} while we've seen GAPs. Truncating file.", queued_data);
                             tdf.file_tracker.trunc(files, flags);
                         }
+                    }
+
+                    // reset timestamp if we get called after a gap
+                    if tdf.post_gap_ts > 0 {
+                        tdf.post_gap_ts = 0;
                     }
 
                     let file_data = &data[0..data_to_handle_len];

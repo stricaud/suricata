@@ -24,16 +24,6 @@
 #ifndef __UTIL_TIME_H__
 #define __UTIL_TIME_H__
 
-/**
- * A timeval with 32 bit fields.
- *
- * Used by the unified on disk file format.
- */
-typedef struct SCTimeval32_ {
-    uint32_t tv_sec;
-    uint32_t tv_usec;
-} SCTimeval32;
-
 void TimeInit(void);
 void TimeDeinit(void);
 
@@ -43,15 +33,27 @@ void TimeGet(struct timeval *);
 /** \brief intialize a 'struct timespec' from a 'struct timeval'. */
 #define FROM_TIMEVAL(timev) { .tv_sec = (timev).tv_sec, .tv_nsec = (timev).tv_usec * 1000 }
 
+/** \brief compare two 'struct timeval' and return the difference in seconds */
+#define TIMEVAL_DIFF_SEC(tv_new, tv_old) \
+    (uint64_t)((((uint64_t)(tv_new).tv_sec * 1000000 + (tv_new).tv_usec) - \
+                ((uint64_t)(tv_old).tv_sec * 1000000 + (tv_old).tv_usec)) / \
+               1000000)
+
+/** \brief compare two 'struct timeval' and return if the first is earlier than the second */
+#define TIMEVAL_EARLIER(tv_first, tv_second) \
+    (((tv_first).tv_sec < (tv_second).tv_sec) || \
+     ((tv_first).tv_sec == (tv_second).tv_sec && (tv_first).tv_usec < (tv_second).tv_usec))
+
 #ifdef UNITTESTS
 void TimeSet(struct timeval *);
 void TimeSetToCurrentTime(void);
 void TimeSetIncrementTime(uint32_t);
 #endif
 
+bool TimeModeIsReady(void);
 void TimeModeSetLive(void);
 void TimeModeSetOffline (void);
-int TimeModeIsLive(void);
+bool TimeModeIsLive(void);
 
 struct tm *SCLocalTime(time_t timep, struct tm *result);
 void CreateTimeString(const struct timeval *ts, char *str, size_t size);

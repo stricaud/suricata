@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2016 Open Information Security Foundation
+/* Copyright (C) 2007-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -38,6 +38,7 @@
 #include "detect.h"
 #include "detect-engine.h"
 #include "detect-engine-address.h"
+#include "detect-engine-threshold.h"
 #include "detect-threshold.h"
 #include "detect-parse.h"
 
@@ -237,6 +238,7 @@ static const char *SCThresholdConfGetConfFilename(const DetectEngineCtx *de_ctx)
 int SCThresholdConfInitContext(DetectEngineCtx *de_ctx)
 {
     const char *filename = NULL;
+    int ret = 0;
 #ifndef UNITTESTS
     FILE *fd = NULL;
 #else
@@ -252,7 +254,15 @@ int SCThresholdConfInitContext(DetectEngineCtx *de_ctx)
     }
 #endif
 
-    SCThresholdConfParseFile(de_ctx, fd);
+    if (SCThresholdConfParseFile(de_ctx, fd) < 0) {
+        SCLogWarning(
+                SC_WARN_THRESH_CONFIG, "Error loading threshold configuration from %s", filename);
+        /* maintain legacy behavior so no errors unless config testing */
+        if (RunmodeGetCurrent() == RUNMODE_CONF_TEST) {
+            ret = -1;
+        }
+        goto error;
+    }
     SCThresholdConfDeInitContext(de_ctx, fd);
 
 #ifdef UNITTESTS
@@ -263,7 +273,8 @@ int SCThresholdConfInitContext(DetectEngineCtx *de_ctx)
 
 error:
     SCThresholdConfDeInitContext(de_ctx, fd);
-    return -1;
+
+return ret;
 }
 
 /**
@@ -295,6 +306,25 @@ static int SetupSuppressRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid,
 
     BUG_ON(parsed_type != TYPE_SUPPRESS);
 
+    DetectThresholdData *orig_de = NULL;
+    if (parsed_track != TRACK_RULE) {
+        orig_de = SCCalloc(1, sizeof(DetectThresholdData));
+        if (unlikely(orig_de == NULL))
+            goto error;
+
+        orig_de->type = TYPE_SUPPRESS;
+        orig_de->track = parsed_track;
+        orig_de->count = parsed_count;
+        orig_de->seconds = parsed_seconds;
+        orig_de->new_action = parsed_new_action;
+        orig_de->timeout = parsed_timeout;
+        if (DetectAddressParse((const DetectEngineCtx *)de_ctx, &orig_de->addrs, (char *)th_ip) <
+                0) {
+            SCLogError(SC_ERR_INVALID_IP_NETBLOCK, "failed to parse %s", th_ip);
+            goto error;
+        }
+    }
+
     /* Install it */
     if (id == 0 && gid == 0) {
         if (parsed_track == TRACK_RULE) {
@@ -309,24 +339,9 @@ static int SetupSuppressRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid,
                 continue;
             }
 
-            de = SCMalloc(sizeof(DetectThresholdData));
+            de = DetectThresholdDataCopy(orig_de);
             if (unlikely(de == NULL))
                 goto error;
-            memset(de,0,sizeof(DetectThresholdData));
-
-            de->type = TYPE_SUPPRESS;
-            de->track = parsed_track;
-            de->count = parsed_count;
-            de->seconds = parsed_seconds;
-            de->new_action = parsed_new_action;
-            de->timeout = parsed_timeout;
-
-            if (parsed_track != TRACK_RULE) {
-                if (DetectAddressParse((const DetectEngineCtx *)de_ctx, &de->addrs, (char *)th_ip) != 0) {
-                    SCLogError(SC_ERR_INVALID_IP_NETBLOCK, "failed to parse %s", th_ip);
-                    goto error;
-                }
-            }
 
             sm = SigMatchAlloc();
             if (sm == NULL) {
@@ -353,25 +368,9 @@ static int SetupSuppressRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid,
                 continue;
             }
 
-            de = SCMalloc(sizeof(DetectThresholdData));
+            de = DetectThresholdDataCopy(orig_de);
             if (unlikely(de == NULL))
                 goto error;
-
-            memset(de,0,sizeof(DetectThresholdData));
-
-            de->type = TYPE_SUPPRESS;
-            de->track = parsed_track;
-            de->count = parsed_count;
-            de->seconds = parsed_seconds;
-            de->new_action = parsed_new_action;
-            de->timeout = parsed_timeout;
-
-            if (parsed_track != TRACK_RULE) {
-                if (DetectAddressParse((const DetectEngineCtx *)de_ctx, &de->addrs, (char *)th_ip) != 0) {
-                    SCLogError(SC_ERR_INVALID_IP_NETBLOCK, "failed to parse %s", th_ip);
-                    goto error;
-                }
-            }
 
             sm = SigMatchAlloc();
             if (sm == NULL) {
@@ -386,8 +385,8 @@ static int SetupSuppressRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid,
         }
     } else if (id > 0 && gid == 0) {
         SCLogError(SC_ERR_INVALID_VALUE, "Can't use a event config that has "
-                   "sid > 0 and gid == 0. Please fix this "
-                   "in your threshold.conf file");
+                                         "sid > 0 and gid == 0. Please fix this "
+                                         "in your threshold.config file");
         goto error;
     } else {
         s = SigFindSignatureBySidGid(de_ctx, id, gid);
@@ -400,22 +399,9 @@ static int SetupSuppressRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid,
                 goto end;
             }
 
-            de = SCMalloc(sizeof(DetectThresholdData));
+            de = DetectThresholdDataCopy(orig_de);
             if (unlikely(de == NULL))
                 goto error;
-            memset(de,0,sizeof(DetectThresholdData));
-
-            de->type = TYPE_SUPPRESS;
-            de->track = parsed_track;
-            de->count = parsed_count;
-            de->seconds = parsed_seconds;
-            de->new_action = parsed_new_action;
-            de->timeout = parsed_timeout;
-
-            if (DetectAddressParse((const DetectEngineCtx *)de_ctx, &de->addrs, (char *)th_ip) != 0) {
-                SCLogError(SC_ERR_INVALID_IP_NETBLOCK, "failed to parse %s", th_ip);
-                goto error;
-            }
 
             sm = SigMatchAlloc();
             if (sm == NULL) {
@@ -431,8 +417,16 @@ static int SetupSuppressRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid,
     }
 
 end:
+    if (orig_de != NULL) {
+        DetectAddressHeadCleanup(&orig_de->addrs);
+        SCFree(orig_de);
+    }
     return 0;
 error:
+    if (orig_de != NULL) {
+        DetectAddressHeadCleanup(&orig_de->addrs);
+        SCFree(orig_de);
+    }
     if (de != NULL) {
         DetectAddressHeadCleanup(&de->addrs);
         SCFree(de);
@@ -453,7 +447,6 @@ static int SetupThresholdRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid
     Signature *s = NULL;
     SigMatch *sm = NULL;
     DetectThresholdData *de = NULL;
-    void *ptmp;
 
     BUG_ON(parsed_type == TYPE_SUPPRESS);
 
@@ -504,19 +497,6 @@ static int SetupThresholdRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid
                 sm->type = DETECT_THRESHOLD;
             sm->ctx = (void *)de;
 
-            if (parsed_track == TRACK_RULE) {
-                ptmp = SCRealloc(de_ctx->ths_ctx.th_entry, (de_ctx->ths_ctx.th_size + 1) * sizeof(DetectThresholdEntry *));
-                if (ptmp == NULL) {
-                    SCFree(de_ctx->ths_ctx.th_entry);
-                    de_ctx->ths_ctx.th_entry = NULL;
-                    SCLogError(SC_ERR_MEM_ALLOC, "Error allocating memory for threshold config"
-                    " (tried to allocate %"PRIu32"th_entrys for rule tracking with rate_filter)", de_ctx->ths_ctx.th_size + 1);
-                } else {
-                    de_ctx->ths_ctx.th_entry = ptmp;
-                    de_ctx->ths_ctx.th_entry[de_ctx->ths_ctx.th_size] = NULL;
-                    de_ctx->ths_ctx.th_size++;
-                }
-            }
             SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_THRESHOLD);
         }
 
@@ -557,19 +537,6 @@ static int SetupThresholdRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid
                     sm->type = DETECT_THRESHOLD;
                 sm->ctx = (void *)de;
 
-                if (parsed_track == TRACK_RULE) {
-                    ptmp = SCRealloc(de_ctx->ths_ctx.th_entry, (de_ctx->ths_ctx.th_size + 1) * sizeof(DetectThresholdEntry *));
-                    if (ptmp == NULL) {
-                        SCFree(de_ctx->ths_ctx.th_entry);
-                        de_ctx->ths_ctx.th_entry = NULL;
-                        SCLogError(SC_ERR_MEM_ALLOC, "Error allocating memory for threshold config"
-                        " (tried to allocate %"PRIu32"th_entrys for rule tracking with rate_filter)", de_ctx->ths_ctx.th_size + 1);
-                    } else {
-                        de_ctx->ths_ctx.th_entry = ptmp;
-                        de_ctx->ths_ctx.th_entry[de_ctx->ths_ctx.th_size] = NULL;
-                        de_ctx->ths_ctx.th_size++;
-                    }
-                }
                 SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_THRESHOLD);
             }
         }
@@ -612,7 +579,7 @@ static int SetupThresholdRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid
                         DETECT_THRESHOLD, DETECT_DETECTION_FILTER, -1);
                 if (sm != NULL) {
                     SigMatchRemoveSMFromList(s, sm, DETECT_SM_LIST_THRESHOLD);
-                    SigMatchFree(sm);
+                    SigMatchFree(de_ctx, sm);
                     sm = NULL;
                 }
             }
@@ -641,20 +608,6 @@ static int SetupThresholdRule(DetectEngineCtx *de_ctx, uint32_t id, uint32_t gid
                 sm->type = DETECT_THRESHOLD;
             sm->ctx = (void *)de;
 
-            if (parsed_track == TRACK_RULE) {
-                 ptmp = SCRealloc(de_ctx->ths_ctx.th_entry, (de_ctx->ths_ctx.th_size + 1) * sizeof(DetectThresholdEntry *));
-                if (ptmp == NULL) {
-                    SCFree(de_ctx->ths_ctx.th_entry);
-                    de_ctx->ths_ctx.th_entry = NULL;
-                    SCLogError(SC_ERR_MEM_ALLOC, "Error allocating memory for threshold config"
-                    " (tried to allocate %"PRIu32"th_entrys for rule tracking with rate_filter)", de_ctx->ths_ctx.th_size + 1);
-                } else {
-                    de_ctx->ths_ctx.th_entry = ptmp;
-                    de_ctx->ths_ctx.th_entry[de_ctx->ths_ctx.th_size] = NULL;
-                    de_ctx->ths_ctx.th_size++;
-                }
-            }
-
             SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_THRESHOLD);
         }
     }
@@ -673,18 +626,18 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
     uint8_t *ret_parsed_type, uint8_t *ret_parsed_track,
     uint32_t *ret_parsed_count, uint32_t *ret_parsed_seconds, uint32_t *ret_parsed_timeout,
     uint8_t *ret_parsed_new_action,
-    const char **ret_th_ip)
+    char **ret_th_ip)
 {
     char th_rule_type[32];
     char th_gid[16];
     char th_sid[16];
-    char rule_extend[1024];
-    const char *th_type = NULL;
-    const char *th_track = NULL;
-    const char *th_count = NULL;
-    const char *th_seconds = NULL;
-    const char *th_new_action= NULL;
-    const char *th_timeout = NULL;
+    const char *rule_extend = NULL;
+    char th_type[16] = "";
+    char th_track[16] = "";
+    char th_count[16] = "";
+    char th_seconds[16] = "";
+    char th_new_action[16] = "";
+    char th_timeout[16] = "";
     const char *th_ip = NULL;
 
     uint8_t parsed_type = 0;
@@ -694,7 +647,6 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
     uint32_t parsed_seconds = 0;
     uint32_t parsed_timeout = 0;
 
-#define MAX_SUBSTRINGS 30
     int ret = 0;
     int ov[MAX_SUBSTRINGS];
     uint32_t id = 0, gid = 0;
@@ -710,28 +662,29 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
     }
 
     /* retrieve the classtype name */
-    ret = pcre_copy_substring((char *)rawstr, ov, 30, 1, th_rule_type, sizeof(th_rule_type));
+    ret = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 1, th_rule_type, sizeof(th_rule_type));
     if (ret < 0) {
-        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
+        SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
         goto error;
     }
 
     /* retrieve the classtype name */
-    ret = pcre_copy_substring((char *)rawstr, ov, 30, 2, th_gid, sizeof(th_gid));
+    ret = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 2, th_gid, sizeof(th_gid));
     if (ret < 0) {
-        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
+        SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
         goto error;
     }
 
-    ret = pcre_copy_substring((char *)rawstr, ov, 30, 3, th_sid, sizeof(th_sid));
+    ret = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 3, th_sid, sizeof(th_sid));
     if (ret < 0) {
-        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
+        SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
         goto error;
     }
 
-    ret = pcre_copy_substring((char *)rawstr, ov, 30, 4, rule_extend, sizeof(rule_extend));
+    /* Use "get" for heap allocation */
+    ret = pcre_get_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 4, &rule_extend);
     if (ret < 0) {
-        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
         goto error;
     }
 
@@ -764,27 +717,27 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, 30, 1, &th_type);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 1, th_type, sizeof(th_type));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, 30, 2, &th_track);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 2, th_track, sizeof(th_track));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, 30, 3, &th_count);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 3, th_count, sizeof(th_count));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, 30, 4, &th_seconds);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 4, th_seconds, sizeof(th_seconds));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
@@ -815,13 +768,13 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
                     goto error;
                 }
                 /* retrieve the track mode */
-                ret = pcre_get_substring((char *)rule_extend, ov, 30, 1, &th_track);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 1, th_track, sizeof(th_track));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
-                /* retrieve the IP */
-                ret = pcre_get_substring((char *)rule_extend, ov, 30, 2, &th_ip);
+                /* retrieve the IP; use "get" for heap allocation */
+                ret = pcre_get_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 2, &th_ip);
                 if (ret < 0) {
                     SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
                     goto error;
@@ -843,39 +796,39 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 1, &th_track);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 1, th_track, sizeof(th_track));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 2, &th_count);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 2, th_count, sizeof(th_count));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 3, &th_seconds);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 3, th_seconds, sizeof(th_seconds));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 4, &th_new_action);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 4, th_new_action, sizeof(th_new_action));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
-                ret = pcre_get_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 5, &th_timeout);
+                ret = pcre_copy_substring((char *)rule_extend, ov, MAX_SUBSTRINGS, 5, th_timeout, sizeof(th_timeout));
                 if (ret < 0) {
-                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
 
                 /* TODO: implement option "apply_to" */
 
-                if (ByteExtractStringUint32(&parsed_timeout, 10, strlen(th_timeout), th_timeout) <= 0) {
+                if (StringParseUint32(&parsed_timeout, 10, strlen(th_timeout), th_timeout) <= 0) {
                     goto error;
                 }
 
@@ -923,7 +876,7 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
                 goto error;
             }
 
-            if (ByteExtractStringUint32(&parsed_count, 10, strlen(th_count), th_count) <= 0) {
+            if (StringParseUint32(&parsed_count, 10, strlen(th_count), th_count) <= 0) {
                 goto error;
             }
             if (parsed_count == 0) {
@@ -931,14 +884,14 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
                 goto error;
             }
 
-            if (ByteExtractStringUint32(&parsed_seconds, 10, strlen(th_seconds), th_seconds) <= 0) {
+            if (StringParseUint32(&parsed_seconds, 10, strlen(th_seconds), th_seconds) <= 0) {
                 goto error;
             }
 
            break;
         case THRESHOLD_TYPE_SUPPRESS:
             /* need to get IP if extension is provided */
-            if (th_track != NULL) {
+            if (strcmp("", th_track) != 0) {
                 if (strcasecmp(th_track,"by_dst") == 0)
                     parsed_track = TRACK_DST;
                 else if (strcasecmp(th_track,"by_src") == 0)
@@ -954,11 +907,11 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
             break;
     }
 
-    if (ByteExtractStringUint32(&id, 10, strlen(th_sid), th_sid) <= 0) {
+    if (StringParseUint32(&id, 10, strlen(th_sid), th_sid) <= 0) {
         goto error;
     }
 
-    if (ByteExtractStringUint32(&gid, 10, strlen(th_gid), th_gid) <= 0) {
+    if (StringParseUint32(&gid, 10, strlen(th_gid), th_gid) <= 0) {
         goto error;
     }
 
@@ -970,19 +923,22 @@ static int ParseThresholdRule(DetectEngineCtx *de_ctx, char *rawstr,
     *ret_parsed_count = parsed_count;
     *ret_parsed_seconds = parsed_seconds;
     *ret_parsed_timeout = parsed_timeout;
-    *ret_th_ip = th_ip;
-    return 0;
-error:
-    if (th_track != NULL)
-        SCFree((char *)th_track);
-    if (th_count != NULL)
-        SCFree((char *)th_count);
-    if (th_seconds != NULL)
-        SCFree((char *)th_seconds);
-    if (th_type != NULL)
-        SCFree((char *)th_type);
-    if (th_ip != NULL)
+    *ret_th_ip = NULL;
+    if (th_ip != NULL) {
+        *ret_th_ip = (char *)th_ip;
+    } else {
         SCFree((char *)th_ip);
+    }
+    SCFree((char *)rule_extend);
+    return 0;
+
+error:
+    if (rule_extend != NULL) {
+        SCFree((char *)rule_extend);
+    }
+    if (th_ip != NULL) {
+        SCFree((char *)th_ip);
+    }
     return -1;
 }
 
@@ -1004,7 +960,7 @@ static int SCThresholdConfAddThresholdtype(char *rawstr, DetectEngineCtx *de_ctx
     uint32_t parsed_count = 0;
     uint32_t parsed_seconds = 0;
     uint32_t parsed_timeout = 0;
-    const char *th_ip = NULL;
+    char *th_ip = NULL;
     uint32_t id = 0, gid = 0;
 
     int r = 0;
@@ -1027,10 +983,11 @@ static int SCThresholdConfAddThresholdtype(char *rawstr, DetectEngineCtx *de_ctx
         goto error;
     }
 
+    SCFree(th_ip);
     return 0;
 error:
     if (th_ip != NULL)
-        SCFree((char *)th_ip);
+        SCFree(th_ip);
     return -1;
 }
 
@@ -1099,7 +1056,7 @@ static int SCThresholdConfLineIsMultiline(char *line)
  * \param de_ctx Pointer to the Detection Engine Context.
  * \param fd Pointer to file descriptor.
  */
-void SCThresholdConfParseFile(DetectEngineCtx *de_ctx, FILE *fp)
+int SCThresholdConfParseFile(DetectEngineCtx *de_ctx, FILE *fp)
 {
     char line[8192] = "";
     int rule_num = 0;
@@ -1108,7 +1065,7 @@ void SCThresholdConfParseFile(DetectEngineCtx *de_ctx, FILE *fp)
     int esc_pos = 0;
 
     if (fp == NULL)
-        return;
+        return -1;
 
     while (fgets(line + esc_pos, (int)sizeof(line) - esc_pos, fp) != NULL) {
         if (SCThresholdConfIsLineBlankOrComment(line)) {
@@ -1117,15 +1074,19 @@ void SCThresholdConfParseFile(DetectEngineCtx *de_ctx, FILE *fp)
 
         esc_pos = SCThresholdConfLineIsMultiline(line);
         if (esc_pos == 0) {
-            rule_num++;
-            SCLogDebug("Adding threshold.config rule num %"PRIu32"( %s )", rule_num, line);
-            SCThresholdConfAddThresholdtype(line, de_ctx);
+            if (SCThresholdConfAddThresholdtype(line, de_ctx) < 0) {
+                if (RunmodeGetCurrent() == RUNMODE_CONF_TEST)
+                    return -1;
+            } else {
+                SCLogDebug("Adding threshold.config rule num %" PRIu32 "( %s )", rule_num, line);
+                rule_num++;
+            }
         }
     }
 
     SCLogInfo("Threshold config parsed: %d rule(s) found", rule_num);
 
-    return;
+    return 0;
 }
 
 #ifdef UNITTESTS
@@ -1189,7 +1150,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD03(void)
 
 /**
  * \brief Creates a dummy threshold file, with all valid options, but
- *        with splitted rules (multiline), for testing purposes.
+ *        with split rules (multiline), for testing purposes.
  *
  * \retval fd Pointer to file descriptor.
  */
@@ -1231,7 +1192,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD05(void)
 
 /**
  * \brief Creates a dummy threshold file, with all valid options, but
- *        with splitted rules (multiline), for testing purposes.
+ *        with split rules (multiline), for testing purposes.
  *
  * \retval fd Pointer to file descriptor.
  */
@@ -1253,7 +1214,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD06(void)
 
 /**
  * \brief Creates a dummy threshold file, with all valid options, but
- *        with splitted rules (multiline), for testing purposes.
+ *        with split rules (multiline), for testing purposes.
  *
  * \retval fd Pointer to file descriptor.
  */
@@ -1291,7 +1252,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD08(void)
 
 /**
  * \brief Creates a dummy threshold file, with all valid options, but
- *        with splitted rules (multiline), for testing purposes.
+ *        with split rules (multiline), for testing purposes.
  *
  * \retval fd Pointer to file descriptor.
  */
@@ -1312,7 +1273,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD09(void)
 
 /**
  * \brief Creates a dummy threshold file, with all valid options, but
- *        with splitted rules (multiline), for testing purposes.
+ *        with split rules (multiline), for testing purposes.
  *
  * \retval fd Pointer to file descriptor.
  */
@@ -1353,7 +1314,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD11(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest01(void)
@@ -1369,7 +1330,7 @@ static int SCThresholdConfTest01(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD01();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_THRESHOLD, -1);
@@ -1386,7 +1347,7 @@ static int SCThresholdConfTest01(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest02(void)
@@ -1402,7 +1363,7 @@ static int SCThresholdConfTest02(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD01();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_THRESHOLD, -1);
@@ -1419,7 +1380,7 @@ static int SCThresholdConfTest02(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest03(void)
@@ -1435,7 +1396,7 @@ static int SCThresholdConfTest03(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD01();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_THRESHOLD, -1);
@@ -1452,7 +1413,7 @@ static int SCThresholdConfTest03(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest04(void)
@@ -1468,7 +1429,7 @@ static int SCThresholdConfTest04(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateInValidDummyFD02();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_THRESHOLD, -1);
@@ -1481,7 +1442,7 @@ static int SCThresholdConfTest04(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest05(void)
@@ -1504,7 +1465,7 @@ static int SCThresholdConfTest05(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD03();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     Signature *s = de_ctx->sig_list;
     SigMatch *m = DetectGetLastSMByListId(s, DETECT_SM_LIST_THRESHOLD,
@@ -1536,7 +1497,7 @@ static int SCThresholdConfTest05(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest06(void)
@@ -1552,7 +1513,7 @@ static int SCThresholdConfTest06(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD04();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_THRESHOLD, -1);
@@ -1569,7 +1530,7 @@ static int SCThresholdConfTest06(void)
 /**
  * \test Check if the rate_filter rules are loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest07(void)
@@ -1585,7 +1546,7 @@ static int SCThresholdConfTest07(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD05();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_DETECTION_FILTER, -1);
@@ -1603,7 +1564,7 @@ static int SCThresholdConfTest07(void)
  * \test Check if the rate_filter rules are loaded and well parsed
  *       with multilines
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest08(void)
@@ -1619,7 +1580,7 @@ static int SCThresholdConfTest08(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD06();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig, DETECT_SM_LIST_THRESHOLD,
             DETECT_DETECTION_FILTER, -1);
@@ -1636,7 +1597,7 @@ static int SCThresholdConfTest08(void)
 /**
  * \test Check if the rate_filter rules work
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest09(void)
@@ -1666,7 +1627,7 @@ static int SCThresholdConfTest09(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD07();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -1724,7 +1685,7 @@ static int SCThresholdConfTest09(void)
 /**
  * \test Check if the rate_filter rules work with track by_rule
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest10(void)
@@ -1760,7 +1721,7 @@ static int SCThresholdConfTest10(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD08();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -1818,7 +1779,7 @@ static int SCThresholdConfTest10(void)
 /**
  * \test Check if the rate_filter rules work
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest11(void)
@@ -1853,7 +1814,7 @@ static int SCThresholdConfTest11(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD09();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -1927,7 +1888,7 @@ static int SCThresholdConfTest11(void)
 /**
  * \test Check if the rate_filter rules work
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest12(void)
@@ -1962,7 +1923,7 @@ static int SCThresholdConfTest12(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD10();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -2036,7 +1997,7 @@ static int SCThresholdConfTest12(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest13(void)
@@ -2052,7 +2013,7 @@ static int SCThresholdConfTest13(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD11();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigMatch *m = DetectGetLastSMByListId(sig,
             DETECT_SM_LIST_SUPPRESS, DETECT_THRESHOLD, -1);
@@ -2069,7 +2030,7 @@ static int SCThresholdConfTest13(void)
 /**
  * \test Check if the suppress rules work
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest14(void)
@@ -2108,7 +2069,7 @@ static int SCThresholdConfTest14(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD11();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -2134,7 +2095,7 @@ static int SCThresholdConfTest14(void)
 /**
  * \test Check if the suppress rules work
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest15(void)
@@ -2164,7 +2125,7 @@ static int SCThresholdConfTest15(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD11();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -2186,7 +2147,7 @@ static int SCThresholdConfTest15(void)
 /**
  * \test Check if the suppress rules work
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest16(void)
@@ -2216,7 +2177,7 @@ static int SCThresholdConfTest16(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD11();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -2237,7 +2198,7 @@ static int SCThresholdConfTest16(void)
 /**
  * \test Check if the suppress rules work - ip only rule
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest17(void)
@@ -2267,7 +2228,7 @@ static int SCThresholdConfTest17(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD11();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -2308,7 +2269,7 @@ static FILE *SCThresholdConfGenerateInvalidDummyFD12(void)
 /**
  * \test Check if the suppress rule parsing handles errors correctly
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest18(void)
@@ -2324,7 +2285,7 @@ static int SCThresholdConfTest18(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateInvalidDummyFD12();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
     SigGroupBuild(de_ctx);
 
     FAIL_IF_NULL(s->sm_arrays[DETECT_SM_LIST_SUPPRESS]);
@@ -2360,7 +2321,7 @@ static FILE *SCThresholdConfGenerateInvalidDummyFD13(void)
 /**
  * \test Check if the suppress rule parsing handles errors correctly
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest19(void)
@@ -2375,7 +2336,7 @@ static int SCThresholdConfTest19(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateInvalidDummyFD13();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
     SigGroupBuild(de_ctx);
     FAIL_IF_NULL(s->sm_arrays[DETECT_SM_LIST_SUPPRESS]);
     SigMatchData *smd = s->sm_arrays[DETECT_SM_LIST_SUPPRESS];
@@ -2410,7 +2371,7 @@ static FILE *SCThresholdConfGenerateValidDummyFD20(void)
 /**
  * \test Check if the threshold file is loaded and well parsed
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest20(void)
@@ -2425,7 +2386,7 @@ static int SCThresholdConfTest20(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD20();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
     SigGroupBuild(de_ctx);
     FAIL_IF_NULL(s->sm_arrays[DETECT_SM_LIST_SUPPRESS]);
 
@@ -2456,7 +2417,7 @@ static int SCThresholdConfTest20(void)
  * \test Check if the threshold file is loaded and well parsed, and applied
  *       correctly to a rule with thresholding
  *
- *  \retval 1 on succces
+ *  \retval 1 on success
  *  \retval 0 on failure
  */
 static int SCThresholdConfTest21(void)
@@ -2470,7 +2431,7 @@ static int SCThresholdConfTest21(void)
     FAIL_IF_NULL(s);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD20();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
     SigGroupBuild(de_ctx);
     FAIL_IF_NULL(s->sm_arrays[DETECT_SM_LIST_SUPPRESS]);
 
@@ -2516,11 +2477,11 @@ static FILE *SCThresholdConfGenerateValidDummyFD22(void)
 }
 
 /**
-* \test Check if the rate_filter rules work with track by_both
-*
-*  \retval 1 on succces
-*  \retval 0 on failure
-*/
+ * \test Check if the rate_filter rules work with track by_both
+ *
+ *  \retval 1 on success
+ *  \retval 0 on failure
+ */
 static int SCThresholdConfTest22(void)
 {
     ThreadVars th_v;
@@ -2557,7 +2518,7 @@ static int SCThresholdConfTest22(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD22();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
@@ -2656,12 +2617,12 @@ static FILE *SCThresholdConfGenerateValidDummyFD23(void)
 }
 
 /**
-* \test Check if the rate_filter by_both work when similar packets
-*       going in opposite direction
-*
-*  \retval 1 on succces
-*  \retval 0 on failure
-*/
+ * \test Check if the rate_filter by_both work when similar packets
+ *       going in opposite direction
+ *
+ *  \retval 1 on success
+ *  \retval 0 on failure
+ */
 static int SCThresholdConfTest23(void)
 {
     ThreadVars th_v;
@@ -2693,7 +2654,7 @@ static int SCThresholdConfTest23(void)
     FAIL_IF_NOT_NULL(g_ut_threshold_fp);
     g_ut_threshold_fp = SCThresholdConfGenerateValidDummyFD23();
     FAIL_IF_NULL(g_ut_threshold_fp);
-    SCThresholdConfInitContext(de_ctx);
+    FAIL_IF(-1 == SCThresholdConfInitContext(de_ctx));
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);

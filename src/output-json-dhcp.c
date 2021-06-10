@@ -1,4 +1,4 @@
-/* Copyright (C) 2015 Open Information Security Foundation
+/* Copyright (C) 2015-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -13,12 +13,6 @@
  * version 2 along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
- */
-
-/*
- * TODO: Update \author in this file and in output-json-dhcp.h.
- * TODO: Remove SCLogNotice statements, or convert to debug.
- * TODO: Implement your app-layers logging.
  */
 
 /**
@@ -48,23 +42,18 @@
 #include "app-layer.h"
 #include "app-layer-parser.h"
 
-#include "app-layer-dhcp.h"
 #include "output-json-dhcp.h"
+#include "rust.h"
 
-#if defined(HAVE_LIBJANSSON) && defined(HAVE_RUST)
-
-#include "rust-dhcp-logger-gen.h"
 
 typedef struct LogDHCPFileCtx_ {
-    LogFileCtx *file_ctx;
-    uint32_t    flags;
     void       *rs_logger;
+    OutputJsonCtx *eve_ctx;
 } LogDHCPFileCtx;
 
 typedef struct LogDHCPLogThread_ {
     LogDHCPFileCtx *dhcplog_ctx;
-    uint32_t        count;
-    MemBuffer      *buffer;
+    OutputJsonThreadCtx *thread;
 } LogDHCPLogThread;
 
 static int JsonDHCPLogger(ThreadVars *tv, void *thread_data,
@@ -73,25 +62,20 @@ static int JsonDHCPLogger(ThreadVars *tv, void *thread_data,
     LogDHCPLogThread *thread = thread_data;
     LogDHCPFileCtx *ctx = thread->dhcplog_ctx;
 
-    json_t *js = CreateJSONHeader((Packet *)p, 0, "dhcp");
+    if (!rs_dhcp_logger_do_log(ctx->rs_logger, tx)) {
+        return TM_ECODE_OK;
+    }
+
+    JsonBuilder *js = CreateEveHeader((Packet *)p, 0, "dhcp", NULL, ctx->eve_ctx);
     if (unlikely(js == NULL)) {
         return TM_ECODE_FAILED;
     }
 
-    json_t *dhcp_js = rs_dhcp_logger_log(ctx->rs_logger, tx);
-    if (unlikely(dhcp_js == NULL)) {
-        goto skip;
-    }
-    json_object_set_new(js, "dhcp", dhcp_js);
+    rs_dhcp_logger_log(ctx->rs_logger, tx, js);
 
-    MemBufferReset(thread->buffer);
-    OutputJSONBuffer(js, thread->dhcplog_ctx->file_ctx, &thread->buffer);
-    json_decref(js);
+    OutputJsonBuilderBuffer(js, thread->thread);
+    jb_free(js);
 
-    return TM_ECODE_OK;
-
-skip:
-    json_decref(js);
     return TM_ECODE_OK;
 }
 
@@ -107,13 +91,12 @@ static OutputInitResult OutputDHCPLogInitSub(ConfNode *conf,
     OutputCtx *parent_ctx)
 {
     OutputInitResult result = { NULL, false };
-    OutputJsonCtx *ajt = parent_ctx->data;
 
     LogDHCPFileCtx *dhcplog_ctx = SCCalloc(1, sizeof(*dhcplog_ctx));
     if (unlikely(dhcplog_ctx == NULL)) {
         return result;
     }
-    dhcplog_ctx->file_ctx = ajt->file_ctx;
+    dhcplog_ctx->eve_ctx = parent_ctx->data;
 
     OutputCtx *output_ctx = SCCalloc(1, sizeof(*output_ctx));
     if (unlikely(output_ctx == NULL)) {
@@ -132,30 +115,21 @@ static OutputInitResult OutputDHCPLogInitSub(ConfNode *conf,
     return result;
 }
 
-#define OUTPUT_BUFFER_SIZE 65535
-
 static TmEcode JsonDHCPLogThreadInit(ThreadVars *t, const void *initdata, void **data)
 {
     LogDHCPLogThread *thread = SCCalloc(1, sizeof(*thread));
     if (unlikely(thread == NULL)) {
         return TM_ECODE_FAILED;
     }
-
-    if (initdata == NULL) {
-        SCLogDebug("Error getting context for EveLogDHCP.  \"initdata\" is NULL.");
+    LogDHCPFileCtx *ctx = ((OutputCtx *)initdata)->data;
+    thread->dhcplog_ctx = ctx;
+    thread->thread = CreateEveThreadCtx(t, ctx->eve_ctx);
+    if (thread->thread == NULL) {
         SCFree(thread);
         return TM_ECODE_FAILED;
     }
 
-    thread->buffer = MemBufferCreateNew(OUTPUT_BUFFER_SIZE);
-    if (unlikely(thread->buffer == NULL)) {
-        SCFree(thread);
-        return TM_ECODE_FAILED;
-    }
-
-    thread->dhcplog_ctx = ((OutputCtx *)initdata)->data;
     *data = (void *)thread;
-
     return TM_ECODE_OK;
 }
 
@@ -165,9 +139,7 @@ static TmEcode JsonDHCPLogThreadDeinit(ThreadVars *t, void *data)
     if (thread == NULL) {
         return TM_ECODE_OK;
     }
-    if (thread->buffer != NULL) {
-        MemBufferFree(thread->buffer);
-    }
+    FreeEveThreadCtx(thread->thread);
     SCFree(thread);
     return TM_ECODE_OK;
 }
@@ -180,11 +152,3 @@ void JsonDHCPLogRegister(void)
         JsonDHCPLogger, JsonDHCPLogThreadInit,
         JsonDHCPLogThreadDeinit, NULL);
 }
-
-#else /* No JSON support. */
-
-void JsonDHCPLogRegister(void)
-{
-}
-
-#endif /* HAVE_LIBJANSSON */

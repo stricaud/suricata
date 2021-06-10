@@ -50,10 +50,12 @@
 #include "util-unittest-helper.h"
 #include "util-device.h"
 
-static int DetectBypassMatch(ThreadVars *, DetectEngineThreadCtx *, Packet *,
+static int DetectBypassMatch(DetectEngineThreadCtx *, Packet *,
         const Signature *, const SigMatchCtx *);
 static int DetectBypassSetup(DetectEngineCtx *, Signature *, const char *);
+#ifdef UNITTESTS
 static void DetectBypassRegisterTests(void);
+#endif
 
 /**
  * \brief Registration function for keyword: bypass
@@ -62,11 +64,13 @@ void DetectBypassRegister(void)
 {
     sigmatch_table[DETECT_BYPASS].name = "bypass";
     sigmatch_table[DETECT_BYPASS].desc = "call the bypass callback when the match of a sig is complete";
-    sigmatch_table[DETECT_BYPASS].url = DOC_URL DOC_VERSION "rules/bypass-keyword.html";
+    sigmatch_table[DETECT_BYPASS].url = "/rules/bypass-keyword.html";
     sigmatch_table[DETECT_BYPASS].Match = DetectBypassMatch;
     sigmatch_table[DETECT_BYPASS].Setup = DetectBypassSetup;
     sigmatch_table[DETECT_BYPASS].Free  = NULL;
+#ifdef UNITTESTS
     sigmatch_table[DETECT_BYPASS].RegisterTests = DetectBypassRegisterTests;
+#endif
     sigmatch_table[DETECT_BYPASS].flags = SIGMATCH_NOOPT;
 }
 
@@ -92,7 +96,7 @@ static int DetectBypassSetup(DetectEngineCtx *de_ctx, Signature *s, const char *
     return 0;
 }
 
-static int DetectBypassMatch(ThreadVars *tv, DetectEngineThreadCtx *det_ctx, Packet *p,
+static int DetectBypassMatch(DetectEngineThreadCtx *det_ctx, Packet *p,
         const Signature *s, const SigMatchCtx *ctx)
 {
     PacketBypassCallback(p);
@@ -171,9 +175,9 @@ static int DetectBypassTestSig01(void)
     p2->flowflags |= FLOW_PKT_ESTABLISHED;
     p2->flags |= PKT_HAS_FLOW|PKT_STREAM_EST;
     p2->livedev = livedev;
-    f.alproto = ALPROTO_HTTP;
+    f.alproto = ALPROTO_HTTP1;
 
-    StreamTcpInitConfig(TRUE);
+    StreamTcpInitConfig(true);
 
     de_ctx = DetectEngineCtxInit();
     FAIL_IF(de_ctx == NULL);
@@ -198,8 +202,8 @@ static int DetectBypassTestSig01(void)
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     FLOWLOCK_WRLOCK(&f);
-    int r = AppLayerParserParse(NULL, alp_tctx, &f, ALPROTO_HTTP,
-                                STREAM_TOSERVER, http_buf1, http_len1);
+    int r = AppLayerParserParse(
+            NULL, alp_tctx, &f, ALPROTO_HTTP1, STREAM_TOSERVER, http_buf1, http_len1);
     FAIL_IF(r != 0);
     FLOWLOCK_UNLOCK(&f);
 
@@ -212,8 +216,8 @@ static int DetectBypassTestSig01(void)
     FAIL_IF(PacketAlertCheck(p1, 1));
 
     FLOWLOCK_WRLOCK(&f);
-    r = AppLayerParserParse(NULL, alp_tctx, &f, ALPROTO_HTTP, STREAM_TOCLIENT,
-                            http_buf2, http_len2);
+    r = AppLayerParserParse(
+            NULL, alp_tctx, &f, ALPROTO_HTTP1, STREAM_TOCLIENT, http_buf2, http_len2);
     FAIL_IF(r != 0);
     FLOWLOCK_UNLOCK(&f);
     /* do detect */
@@ -224,7 +228,7 @@ static int DetectBypassTestSig01(void)
 
     FAIL_IF(callback_var == 0);
 
-    StreamTcpFreeConfig(TRUE);
+    StreamTcpFreeConfig(true);
     FLOW_DESTROY(&f);
     UTHFreePacket(p1);
     UTHFreePacket(p2);
@@ -232,11 +236,9 @@ static int DetectBypassTestSig01(void)
     SCFree(livedev);
     PASS;
 }
-#endif /* UNITTESTS */
 
 static void DetectBypassRegisterTests(void)
 {
-#ifdef UNITTESTS
     UtRegisterTest("DetectBypassTestSig01", DetectBypassTestSig01);
-#endif /* UNITTESTS */
 }
+#endif /* UNITTESTS */

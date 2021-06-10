@@ -217,16 +217,15 @@ static int CIPServiceMatch(ENIPTransaction *enip_data,
  *
  *  \retval 0 no match or 1 match
  */
-int DetectEngineInspectCIP(ThreadVars *tv,
-        DetectEngineCtx *de_ctx, DetectEngineThreadCtx *det_ctx,
-        const Signature *s, const SigMatchData *smd, Flow *f, uint8_t flags,
-        void *alstate, void *txv, uint64_t tx_id)
+int DetectEngineInspectCIP(DetectEngineCtx *de_ctx, DetectEngineThreadCtx *det_ctx,
+        const struct DetectEngineAppInspectionEngine_ *engine, const Signature *s, Flow *f,
+        uint8_t flags, void *alstate, void *txv, uint64_t tx_id)
 {
     SCEnter();
 
 
     ENIPTransaction *tx = (ENIPTransaction *) txv;
-    DetectCipServiceData *cipserviced = (DetectCipServiceData *) smd->ctx;
+    DetectCipServiceData *cipserviced = (DetectCipServiceData *)engine->smd->ctx;
 
     if (cipserviced == NULL)
     {
@@ -257,15 +256,14 @@ int DetectEngineInspectCIP(ThreadVars *tv,
  *  \retval 0 no match or 1 match
  */
 
-int DetectEngineInspectENIP(ThreadVars *tv,
-        DetectEngineCtx *de_ctx, DetectEngineThreadCtx *det_ctx,
-        const Signature *s, const SigMatchData *smd,
-        Flow *f, uint8_t flags, void *alstate, void *txv, uint64_t tx_id)
+int DetectEngineInspectENIP(DetectEngineCtx *de_ctx, DetectEngineThreadCtx *det_ctx,
+        const struct DetectEngineAppInspectionEngine_ *engine, const Signature *s, Flow *f,
+        uint8_t flags, void *alstate, void *txv, uint64_t tx_id)
 {
     SCEnter();
 
     ENIPTransaction *tx = (ENIPTransaction *) txv;
-    DetectEnipCommandData *enipcmdd = (DetectEnipCommandData *) smd->ctx;
+    DetectEnipCommandData *enipcmdd = (DetectEnipCommandData *)engine->smd->ctx;
 
     if (enipcmdd == NULL)
     {
@@ -330,7 +328,7 @@ static int DetectEngineInspectENIPTest01(void)
     p->flags        |= PKT_HAS_FLOW | PKT_STREAM_EST;
     p->flowflags    |= FLOW_PKT_TOSERVER | FLOW_PKT_ESTABLISHED;
 
-    StreamTcpInitConfig(TRUE);
+    StreamTcpInitConfig(true);
 
     de_ctx = DetectEngineCtxInit();
     FAIL_IF_NULL(de_ctx);
@@ -360,7 +358,7 @@ static int DetectEngineInspectENIPTest01(void)
     DetectEngineThreadCtxDeinit(&tv, det_ctx);
     DetectEngineCtxFree(de_ctx);
 
-    StreamTcpFreeConfig(TRUE);
+    StreamTcpFreeConfig(true);
     FLOW_DESTROY(&f);
     UTHFreePacket(p);
 

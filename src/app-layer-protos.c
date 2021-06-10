@@ -33,7 +33,7 @@ const char *AppProtoToString(AppProto alproto)
     enum AppProtoEnum proto = alproto;
 
     switch (proto) {
-        case ALPROTO_HTTP:
+        case ALPROTO_HTTP1:
             proto_name = "http";
             break;
         case ALPROTO_FTP:
@@ -51,17 +51,11 @@ const char *AppProtoToString(AppProto alproto)
         case ALPROTO_IMAP:
             proto_name = "imap";
             break;
-        case ALPROTO_MSN:
-            proto_name = "msn";
-            break;
         case ALPROTO_JABBER:
             proto_name = "jabber";
             break;
         case ALPROTO_SMB:
             proto_name = "smb";
-            break;
-        case ALPROTO_SMB2:
-            proto_name = "smb2";
             break;
         case ALPROTO_DCERPC:
             proto_name = "dcerpc";
@@ -93,8 +87,8 @@ const char *AppProtoToString(AppProto alproto)
         case ALPROTO_TFTP:
             proto_name = "tftp";
             break;
-        case ALPROTO_IKEV2:
-            proto_name = "ikev2";
+        case ALPROTO_IKE:
+            proto_name = "ike";
             break;
         case ALPROTO_KRB5:
             proto_name = "krb5";
@@ -102,11 +96,32 @@ const char *AppProtoToString(AppProto alproto)
         case ALPROTO_DHCP:
             proto_name = "dhcp";
             break;
+        case ALPROTO_SNMP:
+            proto_name = "snmp";
+            break;
+        case ALPROTO_SIP:
+            proto_name = "sip";
+            break;
+        case ALPROTO_RFB:
+            proto_name = "rfb";
+	    break;
+        case ALPROTO_MQTT:
+            proto_name = "mqtt";
+            break;
         case ALPROTO_TEMPLATE:
             proto_name = "template";
             break;
         case ALPROTO_TEMPLATE_RUST:
             proto_name = "template-rust";
+            break;
+        case ALPROTO_RDP:
+            proto_name = "rdp";
+            break;
+        case ALPROTO_HTTP2:
+            proto_name = "http2";
+            break;
+        case ALPROTO_HTTP:
+            proto_name = "http_any";
             break;
         case ALPROTO_FAILED:
             proto_name = "failed";
@@ -126,16 +141,19 @@ AppProto StringToAppProto(const char *proto_name)
 {
     if (proto_name == NULL) return ALPROTO_UNKNOWN;
 
-    if (strcmp(proto_name,"http")==0) return ALPROTO_HTTP;
+    if (strcmp(proto_name, "http") == 0)
+        return ALPROTO_HTTP;
+    if (strcmp(proto_name, "http1") == 0)
+        return ALPROTO_HTTP1;
     if (strcmp(proto_name,"ftp")==0) return ALPROTO_FTP;
+    if (strcmp(proto_name, "ftp-data") == 0)
+        return ALPROTO_FTPDATA;
     if (strcmp(proto_name,"smtp")==0) return ALPROTO_SMTP;
     if (strcmp(proto_name,"tls")==0) return ALPROTO_TLS;
     if (strcmp(proto_name,"ssh")==0) return ALPROTO_SSH;
     if (strcmp(proto_name,"imap")==0) return ALPROTO_IMAP;
-    if (strcmp(proto_name,"msn")==0) return ALPROTO_MSN;
     if (strcmp(proto_name,"jabber")==0) return ALPROTO_JABBER;
     if (strcmp(proto_name,"smb")==0) return ALPROTO_SMB;
-    if (strcmp(proto_name,"smb2")==0) return ALPROTO_SMB2;
     if (strcmp(proto_name,"dcerpc")==0) return ALPROTO_DCERPC;
     if (strcmp(proto_name,"irc")==0) return ALPROTO_IRC;
     if (strcmp(proto_name,"dns")==0) return ALPROTO_DNS;
@@ -144,11 +162,18 @@ AppProto StringToAppProto(const char *proto_name)
     if (strcmp(proto_name,"dnp3")==0) return ALPROTO_DNP3;
     if (strcmp(proto_name,"nfs")==0) return ALPROTO_NFS;
     if (strcmp(proto_name,"ntp")==0) return ALPROTO_NTP;
-    if (strcmp(proto_name,"ikev2")==0) return ALPROTO_IKEV2;
+    if (strcmp(proto_name, "ike") == 0)
+        return ALPROTO_IKE;
     if (strcmp(proto_name,"krb5")==0) return ALPROTO_KRB5;
     if (strcmp(proto_name,"dhcp")==0) return ALPROTO_DHCP;
+    if (strcmp(proto_name,"snmp")==0) return ALPROTO_SNMP;
+    if (strcmp(proto_name,"sip")==0) return ALPROTO_SIP;
+    if (strcmp(proto_name,"rfb")==0) return ALPROTO_RFB;
+    if (strcmp(proto_name,"mqtt")==0) return ALPROTO_MQTT;
     if (strcmp(proto_name,"template")==0) return ALPROTO_TEMPLATE;
     if (strcmp(proto_name,"template-rust")==0) return ALPROTO_TEMPLATE_RUST;
+    if (strcmp(proto_name,"rdp")==0) return ALPROTO_RDP;
+    if (strcmp(proto_name,"http2")==0) return ALPROTO_HTTP2;
     if (strcmp(proto_name,"failed")==0) return ALPROTO_FAILED;
 
     return ALPROTO_UNKNOWN;

@@ -52,7 +52,7 @@
 
 /* Anomaly Flags */
 #define ANOM_INVALID_BASE64      1  /* invalid base64 chars */
-#define ANOM_INVALID_QP          2  /* invalid qouted-printable chars */
+#define ANOM_INVALID_QP          2  /* invalid quoted-printable chars */
 #define ANOM_LONG_HEADER_NAME    4  /* header is abnormally long */
 #define ANOM_LONG_HEADER_VALUE   8  /* header value is abnormally long
                                      * (includes multi-line) */
@@ -60,6 +60,7 @@
 #define ANOM_LONG_ENC_LINE      32  /* Lines that exceed 76 octets */
 #define ANOM_MALFORMED_MSG      64  /* Misc msg format errors found */
 #define ANOM_LONG_BOUNDARY     128  /* Boundary too long */
+#define ANOM_LONG_FILENAME     256  /* filename truncated */
 
 /* Publicly exposed size constants */
 #define DATA_CHUNK_SIZE  3072  /* Should be divisible by 3 */
@@ -196,10 +197,9 @@ typedef struct MimeDecParseState {
     uint8_t bvremain[B64_BLOCK];  /**< Remainder from base64-decoded line */
     uint8_t bvr_len;  /**< Length of remainder from base64-decoded line */
     uint8_t data_chunk[DATA_CHUNK_SIZE];  /**< Buffer holding data chunk */
-#ifdef HAVE_NSS
-    HASHContext *md5_ctx;
-    uint8_t md5[MD5_LENGTH];
-#endif
+    SCMd5 *md5_ctx;
+    uint8_t md5[SC_MD5_LEN];
+    bool has_md5;
     uint8_t state_flag;  /**<  Flag representing current state of parser */
     uint32_t data_chunk_len;  /**< Length of data chunk */
     int found_child;  /**< Flag indicating a child entity was found */
@@ -239,10 +239,6 @@ int MimeDecParseLine(const uint8_t *line, const uint32_t len, const uint8_t deli
 MimeDecEntity * MimeDecParseFullMsg(const uint8_t *buf, uint32_t blen, void *data,
         int (*DataChunkProcessorFunc)(const uint8_t *chunk, uint32_t len, MimeDecParseState *state));
 const char *MimeDecParseStateGetStatus(MimeDecParseState *state);
-
-#ifdef AFLFUZZ_MIME
-int MimeParserDataFromFile(char *filename);
-#endif
 
 /* Test functions */
 void MimeDecRegisterTests(void);

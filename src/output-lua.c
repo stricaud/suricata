@@ -1,4 +1,4 @@
-/* Copyright (C) 2014 Open Information Security Foundation
+/* Copyright (C) 2014-2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -63,6 +63,7 @@
 #include "util-lua-ja3.h"
 #include "util-lua-tls.h"
 #include "util-lua-ssh.h"
+#include "util-lua-hassh.h"
 #include "util-lua-smtp.h"
 
 #define MODULE_NAME "LuaLog"
@@ -195,13 +196,6 @@ static int LuaPacketLoggerAlerts(ThreadVars *tv, void *thread_data, const Packet
         goto not_supported;
     }
 
-    char proto[16] = "";
-    if (SCProtoNameValid(IP_GET_IPPROTO(p)) == TRUE) {
-        strlcpy(proto, known_proto[IP_GET_IPPROTO(p)], sizeof(proto));
-    } else {
-        snprintf(proto, sizeof(proto), "PROTO:%03" PRIu32, IP_GET_IPPROTO(p));
-    }
-
     /* loop through alerts stored in the packet */
     SCMutexLock(&td->lua_ctx->m);
     uint16_t cnt;
@@ -265,13 +259,6 @@ static int LuaPacketLogger(ThreadVars *tv, void *thread_data, const Packet *p)
     }
 
     CreateTimeString(&p->ts, timebuf, sizeof(timebuf));
-
-    char proto[16] = "";
-    if (SCProtoNameValid(IP_GET_IPPROTO(p)) == TRUE) {
-        strlcpy(proto, known_proto[IP_GET_IPPROTO(p)], sizeof(proto));
-    } else {
-        snprintf(proto, sizeof(proto), "PROTO:%03" PRIu32, IP_GET_IPPROTO(p));
-    }
 
     /* loop through alerts stored in the packet */
     SCMutexLock(&td->lua_ctx->m);
@@ -526,7 +513,7 @@ static int LuaScriptInit(const char *filename, LogLuaScriptOptions *options) {
         SCLogDebug("k='%s', v='%s'", k, v);
 
         if (strcmp(k,"protocol") == 0 && strcmp(v, "http") == 0)
-            options->alproto = ALPROTO_HTTP;
+            options->alproto = ALPROTO_HTTP1;
         else if (strcmp(k,"protocol") == 0 && strcmp(v, "dns") == 0)
             options->alproto = ALPROTO_DNS;
         else if (strcmp(k,"protocol") == 0 && strcmp(v, "tls") == 0)
@@ -637,6 +624,7 @@ static lua_State *LuaScriptSetup(const char *filename)
     LuaRegisterJa3Functions(luastate);
     LuaRegisterTlsFunctions(luastate);
     LuaRegisterSshFunctions(luastate);
+    LuaRegisterHasshFunctions(luastate);
     LuaRegisterSmtpFunctions(luastate);
 
     if (lua_pcall(luastate, 0, 0, 0) != 0) {
@@ -795,24 +783,25 @@ static OutputInitResult OutputLuaLogInit(ConfNode *conf)
         om->ThreadInit = LuaLogThreadInit;
         om->ThreadDeinit = LuaLogThreadDeinit;
 
-        if (opts.alproto == ALPROTO_HTTP && opts.streaming) {
+        if (opts.alproto == ALPROTO_HTTP1 && opts.streaming) {
             om->StreamingLogFunc = LuaStreamingLogger;
             om->stream_type = STREAMING_HTTP_BODIES;
-            om->alproto = ALPROTO_HTTP;
+            om->alproto = ALPROTO_HTTP1;
             AppLayerHtpEnableRequestBodyCallback();
             AppLayerHtpEnableResponseBodyCallback();
-        } else if (opts.alproto == ALPROTO_HTTP) {
+        } else if (opts.alproto == ALPROTO_HTTP1) {
             om->TxLogFunc = LuaTxLogger;
-            om->alproto = ALPROTO_HTTP;
+            om->alproto = ALPROTO_HTTP1;
             om->ts_log_progress = -1;
             om->tc_log_progress = -1;
-            AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_HTTP);
+            AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_HTTP1);
         } else if (opts.alproto == ALPROTO_TLS) {
             om->TxLogFunc = LuaTxLogger;
             om->alproto = ALPROTO_TLS;
             om->tc_log_progress = TLS_HANDSHAKE_DONE;
             om->ts_log_progress = TLS_HANDSHAKE_DONE;
-       } else if (opts.alproto == ALPROTO_DNS) {
+            AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_TLS);
+        } else if (opts.alproto == ALPROTO_DNS) {
             om->TxLogFunc = LuaTxLogger;
             om->alproto = ALPROTO_DNS;
             om->ts_log_progress = -1;
@@ -822,8 +811,8 @@ static OutputInitResult OutputLuaLogInit(ConfNode *conf)
         } else if (opts.alproto == ALPROTO_SSH) {
             om->TxLogFunc = LuaTxLogger;
             om->alproto = ALPROTO_SSH;
-            om->tc_log_progress = SSH_STATE_BANNER_DONE;
-            om->ts_log_progress = SSH_STATE_BANNER_DONE;
+            om->TxLogCondition = SSHTxLogCondition;
+            AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_SSH);
         } else if (opts.alproto == ALPROTO_SMTP) {
             om->TxLogFunc = LuaTxLogger;
             om->alproto = ALPROTO_SMTP;
@@ -868,10 +857,9 @@ error:
         SCLogDebug("ConfGetBool could not load the value.");
     }
     if (failure_fatal) {
-        SCLogError(SC_ERR_LUA_ERROR,
-                   "Error during setup of lua output. Details should be "
-                   "described in previous error messages. Shutting down...");
-        exit(EXIT_FAILURE);
+                   FatalError(SC_ERR_FATAL,
+                              "Error during setup of lua output. Details should be "
+                              "described in previous error messages. Shutting down...");
     }
 
     return result;

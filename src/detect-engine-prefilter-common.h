@@ -19,10 +19,10 @@
 #define __DETECT_ENGINE_PREFILTER_COMMON_H__
 
 typedef union {
-    uint8_t u8[8];
-    uint16_t u16[4];
-    uint32_t u32[2];
-    uint64_t u64;
+    uint8_t u8[16];
+    uint16_t u16[8];
+    uint32_t u32[4];
+    uint64_t u64[2];
 } PrefilterPacketHeaderValue;
 
 #define PREFILTER_EXTRA_MATCH_UNUSED  0
@@ -59,18 +59,18 @@ typedef struct PrefilterPacketU8HashCtx_ {
 int PrefilterSetupPacketHeader(DetectEngineCtx *de_ctx,
         SigGroupHead *sgh, int sm_type,
         void (*Set)(PrefilterPacketHeaderValue *v, void *),
-        _Bool (*Compare)(PrefilterPacketHeaderValue v, void *),
+        bool (*Compare)(PrefilterPacketHeaderValue v, void *),
         void (*Match)(DetectEngineThreadCtx *det_ctx,
             Packet *p, const void *pectx));
 
 int PrefilterSetupPacketHeaderU8Hash(DetectEngineCtx *de_ctx,
         SigGroupHead *sgh, int sm_type,
         void (*Set)(PrefilterPacketHeaderValue *v, void *),
-        _Bool (*Compare)(PrefilterPacketHeaderValue v, void *),
+        bool (*Compare)(PrefilterPacketHeaderValue v, void *),
         void (*Match)(DetectEngineThreadCtx *det_ctx,
             Packet *p, const void *pectx));
 
-static inline _Bool
+static inline bool
 PrefilterPacketHeaderExtraMatch(const PrefilterPacketHeaderCtx *ctx,
                                 const Packet *p)
 {
@@ -79,19 +79,30 @@ PrefilterPacketHeaderExtraMatch(const PrefilterPacketHeaderCtx *ctx,
         case PREFILTER_EXTRA_MATCH_UNUSED:
             break;
         case PREFILTER_EXTRA_MATCH_ALPROTO:
-            if (p->flow == NULL || p->flow->alproto != ctx->value)
-                return FALSE;
+            if (p->flow == NULL || !AppProtoEquals(ctx->value, p->flow->alproto))
+                return false;
             break;
         case PREFILTER_EXTRA_MATCH_SRCPORT:
             if (p->sp != ctx->value)
-                return FALSE;
+                return false;
             break;
         case PREFILTER_EXTRA_MATCH_DSTPORT:
             if (p->dp != ctx->value)
-                return FALSE;
+                return false;
             break;
     }
-    return TRUE;
+    return true;
+}
+
+static inline bool PrefilterIsPrefilterableById(const Signature *s, enum DetectKeywordId kid)
+{
+    const SigMatch *sm;
+    for (sm = s->init_data->smlists[DETECT_SM_LIST_MATCH] ; sm != NULL; sm = sm->next) {
+        if (sm->type == kid) {
+            return true;
+        }
+    }
+    return false;
 }
 
 #endif /* __DETECT_ENGINE_PREFILTER_COMMON_H__ */

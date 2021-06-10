@@ -1,4 +1,4 @@
-/* Copyright (C) 2018 Open Information Security Foundation
+/* Copyright (C) 2018-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -17,10 +17,13 @@
 
 #include "suricata-common.h"
 
+#include "stream-tcp.h"
 #include "app-layer-parser.h"
 #include "app-layer-htp.h"
 #include "app-layer-htp-xff.h"
 #include "app-layer-smtp.h"
+
+#include "feature.h"
 
 #include "output.h"
 #include "output-filestore.h"
@@ -29,13 +32,11 @@
 #include "util-print.h"
 #include "util-misc.h"
 
-#ifdef HAVE_NSS
-
 #define MODULE_NAME "OutputFilestore"
 
 /* Create a filestore specific PATH_MAX that is less than the system
  * PATH_MAX to prevent newer gcc truncation warnings with snprint. */
-#define SHA256_STRING_LEN (SHA256_LENGTH * 2)
+#define SHA256_STRING_LEN    (SC_SHA256_LEN * 2)
 #define LEAF_DIR_MAX_LEN 4
 #define FILESTORE_PREFIX_MAX (PATH_MAX - SHA256_STRING_LEN - LEAF_DIR_MAX_LEN)
 
@@ -61,7 +62,7 @@ typedef struct OutputFilestoreLogThread_ {
 
 /* For WARN_ONCE, a record of warnings that have already been
  * issued. */
-static __thread bool once_errs[SC_ERR_MAX];
+static thread_local bool once_errs[SC_ERR_MAX];
 
 #define WARN_ONCE(err_code, ...)  do {                   \
         if (!once_errs[err_code]) {                      \
@@ -126,7 +127,7 @@ static void OutputFilestoreFinalizeFiles(ThreadVars *tv,
         const Packet *p, File *ff, uint8_t dir) {
     /* Stringify the SHA256 which will be used in the final
      * filename. */
-    char sha256string[(SHA256_LENGTH * 2) + 1];
+    char sha256string[(SC_SHA256_LEN * 2) + 1];
     PrintHexString(sha256string, sizeof(sha256string), ff->sha256,
             sizeof(ff->sha256));
 
@@ -158,7 +159,6 @@ static void OutputFilestoreFinalizeFiles(ThreadVars *tv,
         return;
     }
 
-#ifdef HAVE_LIBJANSSON
     if (ctx->fileinfo) {
         char js_metadata_filename[PATH_MAX];
         if (snprintf(js_metadata_filename, sizeof(js_metadata_filename),
@@ -168,15 +168,20 @@ static void OutputFilestoreFinalizeFiles(ThreadVars *tv,
             WARN_ONCE(SC_ERR_SPRINTF,
                 "Failed to write file info record. Output filename truncated.");
         } else {
-            json_t *js_fileinfo = JsonBuildFileInfoRecord(p, ff, true, dir,
-                    ctx->xff_cfg);
+            JsonBuilder *js_fileinfo =
+                    JsonBuildFileInfoRecord(p, ff, true, dir, ctx->xff_cfg, NULL);
             if (likely(js_fileinfo != NULL)) {
-                json_dump_file(js_fileinfo, js_metadata_filename, 0);
-                json_decref(js_fileinfo);
+                jb_close(js_fileinfo);
+                FILE *out = fopen(js_metadata_filename, "w");
+                if (out != NULL) {
+                    size_t js_len = jb_len(js_fileinfo);
+                    fwrite(jb_ptr(js_fileinfo), js_len, 1, out);
+                    fclose(out);
+                }
+                jb_free(js_fileinfo);
             }
         }
     }
-#endif
 }
 
 static int OutputFilestoreLogger(ThreadVars *tv, void *thread_data,
@@ -403,7 +408,8 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
 
     intmax_t version = 0;
     if (!ConfGetChildValueInt(conf, "version", &version) || version < 2) {
-        result.ok = true;
+        SCLogWarning(SC_WARN_DEPRECATED,
+            "File-store v1 been removed. Please update to file-store v2.");
         return result;
     }
 
@@ -451,13 +457,8 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
     const char *write_fileinfo = ConfNodeLookupChildValue(conf,
             "write-fileinfo");
     if (write_fileinfo != NULL && ConfValIsTrue(write_fileinfo)) {
-#ifdef HAVE_LIBJANSSON
         SCLogConfig("Filestore (v2) will output fileinfo records.");
         ctx->fileinfo = true;
-#else
-        SCLogWarning(SC_ERR_NO_JSON_SUPPORT,
-                "Filestore (v2) requires JSON support to log fileinfo records");
-#endif
     }
 
     const char *force_filestore = ConfNodeLookupChildValue(conf,
@@ -478,6 +479,8 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
     /* The new filestore requires SHA256. */
     FileForceSha256Enable();
 
+    ProvidesFeature(FEATURE_OUTPUT_FILESTORE);
+
     const char *stream_depth_str = ConfNodeLookupChildValue(conf,
             "stream-depth");
     if (stream_depth_str != NULL && strcmp(stream_depth_str, "no")) {
@@ -489,8 +492,16 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
                        "from conf file - %s.  Killing engine",
                        stream_depth_str);
             exit(EXIT_FAILURE);
-        } else {
-            FileReassemblyDepthEnable(stream_depth);
+        }
+        if (stream_depth) {
+            if (stream_depth <= stream_config.reassembly_depth) {
+                SCLogWarning(SC_WARN_FILESTORE_CONFIG,
+                           "file-store.stream-depth value %" PRIu32 " has "
+                           "no effect since it's less than stream.reassembly.depth "
+                           "value.", stream_depth);
+            } else {
+                FileReassemblyDepthEnable(stream_depth);
+            }
         }
     }
 
@@ -503,7 +514,7 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
             SCLogError(SC_ERR_SIZE_PARSE, "Error parsing "
                        "file-store.max-open-files "
                        "from conf file - %s.  Killing engine",
-                       stream_depth_str);
+                       file_count_str);
             exit(EXIT_FAILURE);
         } else {
             if (file_count != 0) {
@@ -514,19 +525,13 @@ static OutputInitResult OutputFilestoreLogInitCtx(ConfNode *conf)
         }
     }
 
-    StatsRegisterGlobalCounter("file_store.open_files",
-            OutputFilestoreOpenFilesCounter);
-
     result.ctx = output_ctx;
     result.ok = true;
     SCReturnCT(result, "OutputInitResult");
 }
 
-#endif /* HAVE_NSS */
-
 void OutputFilestoreRegister(void)
 {
-#ifdef HAVE_NSS
     OutputRegisterFiledataModule(LOGGER_FILE_STORE, MODULE_NAME, "file-store",
             OutputFilestoreLogInitCtx, OutputFilestoreLogger,
             OutputFilestoreLogThreadInit, OutputFilestoreLogThreadDeinit,
@@ -534,5 +539,9 @@ void OutputFilestoreRegister(void)
 
     SC_ATOMIC_INIT(filestore_open_file_cnt);
     SC_ATOMIC_SET(filestore_open_file_cnt, 0);
-#endif
+}
+
+void OutputFilestoreRegisterGlobalCounters(void)
+{
+    StatsRegisterGlobalCounter("file_store.open_files", OutputFilestoreOpenFilesCounter);
 }

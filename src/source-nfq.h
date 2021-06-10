@@ -30,7 +30,8 @@
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <libnetfilter_queue/libnetfilter_queue.h>
 
-#define NFQ_MAX_QUEUE 16
+// Netfilter's limit
+#define NFQ_MAX_QUEUE 65535
 
 /* idea: set the recv-thread id in the packet to
  * select an verdict-queue */
@@ -88,12 +89,14 @@ typedef struct NFQGlobalVars_
     char unbind;
 } NFQGlobalVars;
 
-void NFQInitConfig(char quiet);
-int NFQRegisterQueue(char *queue);
+void NFQInitConfig(bool quiet);
+int NFQRegisterQueue(const uint16_t number);
+int NFQParseAndRegisterQueues(const char *queues);
 int NFQGetQueueCount(void);
 void *NFQGetQueue(int number);
 int NFQGetQueueNum(int number);
 void *NFQGetThread(int number);
+void NFQContextsClean(void);
 #endif /* NFQ */
 #endif /* __SOURCE_NFQ_H__ */
 

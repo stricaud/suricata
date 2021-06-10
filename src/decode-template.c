@@ -1,4 +1,4 @@
-/* Copyright (C) 2015-2018 Open Information Security Foundation
+/* Copyright (C) 2015-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -36,6 +36,8 @@
 #include "decode-events.h"
 #include "decode-template.h"
 
+#include "util-validate.h"
+
 /**
  * \brief Function to decode TEMPLATE packets
  * \param tv thread vars
@@ -47,8 +49,10 @@
  */
 
 int DecodeTEMPLATE(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
-                   const uint8_t *pkt, uint32_t len, PacketQueue *pq)
+                   const uint8_t *pkt, uint32_t len)
 {
+    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
+
     /* TODO add counter for your type of packet to DecodeThreadVars,
      * and register it in DecodeRegisterPerfCounters */
     //StatsIncr(tv, dtv->counter_template);
@@ -60,6 +64,15 @@ int DecodeTEMPLATE(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
          * decode-events.h, and are then exposed to the detection
          * engine through detect-engine-events.h */
         //ENGINE_SET_EVENT(p,TEMPLATE_HEADER_TOO_SMALL);
+        return TM_ECODE_FAILED;
+    }
+    /* Each packet keeps a count of decoded layers
+     * This function increases it and returns false
+     * if we have too many decoded layers, such as
+     * ethernet/MPLS/ethernet/MPLS... which may
+     * lead to stack overflow by a too deep recursion
+     */
+    if (!PacketIncreaseCheckLayers(p)) {
         return TM_ECODE_FAILED;
     }
 
@@ -82,7 +95,7 @@ int DecodeTEMPLATE(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
          */
 
         /* invoke the next decoder on the remainder of the data */
-        return DecodeUDP(tv, dtv, p, (uint8_t *)pkt + hdr_len, len - hdr_len, pq);
+        return DecodeUDP(tv, dtv, p, (uint8_t *)pkt + hdr_len, len - hdr_len);
     } else {
         //ENGINE_SET_EVENT(p,TEMPLATE_UNSUPPORTED_PROTOCOL);
         return TM_ECODE_FAILED;

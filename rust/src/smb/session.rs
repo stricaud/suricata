@@ -15,13 +15,12 @@
  * 02110-1301, USA.
  */
 
-use log::*;
-use kerberos::*;
-use smb::smb::*;
-use smb::smb1_session::*;
-use smb::auth::*;
+use crate::kerberos::*;
+use crate::smb::smb::*;
+use crate::smb::smb1_session::*;
+use crate::smb::auth::*;
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct SMBTransactionSessionSetup {
     pub request_host: Option<SessionSetupRequest>,
     pub response_host: Option<SessionSetupResponse>,
@@ -30,19 +29,14 @@ pub struct SMBTransactionSessionSetup {
 }
 
 impl SMBTransactionSessionSetup {
-    pub fn new() -> SMBTransactionSessionSetup {
-        return SMBTransactionSessionSetup {
-            request_host: None,
-            response_host: None,
-            ntlmssp: None,
-            krb_ticket: None,
-        }
+    pub fn new() -> Self {
+        return Default::default()
     }
 }
 
 impl SMBState {
     pub fn new_sessionsetup_tx(&mut self, hdr: SMBCommonHdr)
-        -> (&mut SMBTransaction)
+        -> &mut SMBTransaction
     {
         let mut tx = self.new_tx();
 
@@ -62,7 +56,7 @@ impl SMBState {
         -> Option<&mut SMBTransaction>
     {
         for tx in &mut self.transactions {
-            let hit = tx.hdr == hdr && match tx.type_data {
+            let hit = tx.hdr.compare(&hdr) && match tx.type_data {
                 Some(SMBTransactionTypeData::SESSIONSETUP(_)) => { true },
                 _ => { false },
             };

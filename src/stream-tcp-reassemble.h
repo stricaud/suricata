@@ -82,9 +82,9 @@ typedef struct TcpReassemblyThreadCtx_ {
 #define OS_POLICY_DEFAULT   OS_POLICY_BSD
 
 void StreamTcpReassembleInitMemuse(void);
-int StreamTcpReassembleHandleSegment(ThreadVars *, TcpReassemblyThreadCtx *, TcpSession *, TcpStream *, Packet *, PacketQueue *);
-int StreamTcpReassembleInit(char);
-void StreamTcpReassembleFree(char);
+int StreamTcpReassembleHandleSegment(ThreadVars *, TcpReassemblyThreadCtx *, TcpSession *, TcpStream *, Packet *, PacketQueueNoLock *);
+int StreamTcpReassembleInit(bool);
+void StreamTcpReassembleFree(bool);
 void StreamTcpReassembleRegisterTests(void);
 TcpReassemblyThreadCtx *StreamTcpReassembleInitThreadCtx(ThreadVars *tv);
 void StreamTcpReassembleFreeThreadCtx(TcpReassemblyThreadCtx *);
@@ -94,9 +94,9 @@ int StreamTcpReassembleAppLayer (ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx,
 
 void StreamTcpCreateTestPacket(uint8_t *, uint8_t, uint8_t, uint8_t);
 
-void StreamTcpSetSessionNoReassemblyFlag (TcpSession *, char );
-void StreamTcpSetSessionBypassFlag (TcpSession *);
-void StreamTcpSetDisableRawReassemblyFlag (TcpSession *ssn, char direction);
+void StreamTcpSetSessionNoReassemblyFlag(TcpSession *, char);
+void StreamTcpSetSessionBypassFlag(TcpSession *);
+void StreamTcpSetDisableRawReassemblyFlag(TcpSession *, char);
 
 void StreamTcpSetOSPolicy(TcpStream *, Packet *);
 

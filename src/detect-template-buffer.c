@@ -59,7 +59,7 @@ void DetectTemplateBufferRegister(void)
     /* TEMPLATE_END_REMOVE */
     sigmatch_table[DETECT_AL_TEMPLATE_BUFFER].name = "template_buffer";
     sigmatch_table[DETECT_AL_TEMPLATE_BUFFER].desc =
-        "Template content modififier to match on the template buffers";
+            "Template content modifier to match on the template buffers";
     sigmatch_table[DETECT_AL_TEMPLATE_BUFFER].Setup = DetectTemplateBufferSetup;
 #ifdef UNITTESTS
     sigmatch_table[DETECT_AL_TEMPLATE_BUFFER].RegisterTests =
@@ -133,7 +133,7 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
             return NULL; /* no buffer */
         }
 
-        InspectionBufferSetup(buffer, data, data_len);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
         InspectionBufferApplyTransforms(buffer, transforms);
     }
 

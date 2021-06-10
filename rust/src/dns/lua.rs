@@ -17,9 +17,9 @@
 
 use std::os::raw::c_int;
 
-use lua::*;
-use dns::dns::*;
-use dns::log::*;
+use crate::lua::*;
+use crate::dns::dns::*;
+use crate::dns::log::*;
 
 #[no_mangle]
 pub extern "C" fn rs_dns_lua_get_tx_id(clua: &mut CLuaState,
@@ -51,6 +51,24 @@ pub extern "C" fn rs_dns_lua_get_rrname(clua: &mut CLuaState,
             lua.pushstring(&String::from_utf8_lossy(&query.name));
             return 1;
         }
+    }
+
+    return 0;
+}
+
+#[no_mangle]
+pub extern "C" fn rs_dns_lua_get_rcode(clua: &mut CLuaState,
+                                       tx: &mut DNSTransaction)
+                                       -> c_int
+{
+    let lua = LuaState{
+        lua: clua,
+    };
+
+    let rcode = tx.rcode();
+    if rcode > 0 {
+        lua.pushstring(&dns_rcode_string(rcode));
+        return 1;
     }
 
     return 0;
@@ -147,17 +165,45 @@ pub extern "C" fn rs_dns_lua_get_answer_table(clua: &mut CLuaState,
             lua.pushstring(&String::from_utf8_lossy(&answer.name));
             lua.settable(-3);
 
-            if answer.data.len() > 0 {
-                lua.pushstring("addr");
-                match answer.rrtype {
-                    DNS_RECORD_TYPE_A | DNS_RECORD_TYPE_AAAA => {
-                        lua.pushstring(&dns_print_addr(&answer.data));
+            // All rdata types are pushed to "addr" for backwards compatibility
+            match answer.data {
+                DNSRData::A(ref bytes) | DNSRData::AAAA(ref bytes) => {
+                    if bytes.len() > 0 {
+                        lua.pushstring("addr");
+                        lua.pushstring(&dns_print_addr(&bytes));
+                        lua.settable(-3);
                     }
-                    _ => {
-                        lua.pushstring(&String::from_utf8_lossy(&answer.data));
+                },
+                DNSRData::CNAME(ref bytes) |
+                DNSRData::MX(ref bytes) |
+                DNSRData::NS(ref bytes) |
+                DNSRData::TXT(ref bytes) |
+                DNSRData::NULL(ref bytes) |
+                DNSRData::PTR(ref bytes) |
+                DNSRData::Unknown(ref bytes) => {
+                    if bytes.len() > 0 {
+                        lua.pushstring("addr");
+                        lua.pushstring(&String::from_utf8_lossy(&bytes));
+                        lua.settable(-3);
                     }
-                }
-                lua.settable(-3);
+                },
+                DNSRData::SOA(ref soa) => {
+                    if soa.mname.len() > 0 {
+                        lua.pushstring("addr");
+                        lua.pushstring(&String::from_utf8_lossy(&soa.mname));
+                        lua.settable(-3);
+                    }
+                },
+                DNSRData::SSHFP(ref sshfp) => {
+                    lua.pushstring("addr");
+                    lua.pushstring(&String::from_utf8_lossy(&sshfp.fingerprint));
+                    lua.settable(-3);
+                },
+                DNSRData::SRV(ref srv) => {
+                    lua.pushstring("addr");
+                    lua.pushstring(&String::from_utf8_lossy(&srv.target));
+                    lua.settable(-3);
+                },
             }
             lua.settable(-3);
         }

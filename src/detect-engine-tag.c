@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2013 Open Information Security Foundation
+/* Copyright (C) 2007-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -45,22 +45,20 @@
 SC_ATOMIC_DECLARE(unsigned int, num_tags);  /**< Atomic counter, to know if we
                                                  have tagged hosts/sessions,
                                                  to avoid locking */
-static int host_tag_id = -1;                /**< Host storage id for tags */
-static int flow_tag_id = -1;                /**< Flow storage id for tags */
+static HostStorageId host_tag_id = { .id = -1 }; /**< Host storage id for tags */
+static FlowStorageId flow_tag_id = { .id = -1 }; /**< Flow storage id for tags */
 
 void TagInitCtx(void)
 {
     SC_ATOMIC_INIT(num_tags);
 
     host_tag_id = HostStorageRegister("tag", sizeof(void *), NULL, DetectTagDataListFree);
-    if (host_tag_id == -1) {
-        SCLogError(SC_ERR_HOST_INIT, "Can't initiate host storage for tag");
-        exit(EXIT_FAILURE);
+    if (host_tag_id.id == -1) {
+        FatalError(SC_ERR_FATAL, "Can't initiate host storage for tag");
     }
     flow_tag_id = FlowStorageRegister("tag", sizeof(void *), NULL, DetectTagDataListFree);
-    if (flow_tag_id == -1) {
-        SCLogError(SC_ERR_FLOW_INIT, "Can't initiate flow storage for tag");
-        exit(EXIT_FAILURE);
+    if (flow_tag_id.id == -1) {
+        FatalError(SC_ERR_FATAL, "Can't initiate flow storage for tag");
     }
 }
 
@@ -75,7 +73,6 @@ void TagDestroyCtx(void)
 #ifdef DEBUG
     BUG_ON(SC_ATOMIC_GET(num_tags) != 0);
 #endif
-    SC_ATOMIC_DESTROY(num_tags);
 }
 
 /** \brief Reset the tagging engine context
@@ -120,7 +117,7 @@ static DetectTagDataEntry *DetectTagDataCopy(DetectTagDataEntry *dtd)
  * \param p pointer to the current packet
  * \param tde pointer to the new DetectTagDataEntry
  *
- * \retval 0 if the tde was added succesfuly
+ * \retval 0 if the tde was added successfully
  * \retval 1 if an entry of this sid/gid already exist and was updated
  */
 int TagFlowAdd(Packet *p, DetectTagDataEntry *tde)
@@ -185,7 +182,7 @@ int TagHashAddTag(DetectTagDataEntry *tde, Packet *p)
     SCEnter();
 
     uint8_t updated = 0;
-    uint16_t num_tags = 0;
+    uint16_t ntags = 0;
     Host *host = NULL;
 
     /* Lookup host in the hash. If it doesn't exist yet it's
@@ -218,7 +215,7 @@ int TagHashAddTag(DetectTagDataEntry *tde, Packet *p)
         DetectTagDataEntry *iter = NULL;
 
         for (iter = tag; iter != NULL; iter = iter->next) {
-            num_tags++;
+            ntags++;
             if (iter->sid == tde->sid && iter->gid == tde->gid) {
                 iter->cnt_match++;
                 /* If so, update data, unless the maximum MATCH limit is
@@ -235,7 +232,7 @@ int TagHashAddTag(DetectTagDataEntry *tde, Packet *p)
         }
 
         /* If there was no entry of this rule, append the new tde */
-        if (updated == 0 && num_tags < DETECT_TAG_MAX_TAGS) {
+        if (updated == 0 && ntags < DETECT_TAG_MAX_TAGS) {
             /* get a new tde as the one we have is on the stack */
             DetectTagDataEntry *new_tde = DetectTagDataCopy(tde);
             if (new_tde != NULL) {
@@ -244,8 +241,8 @@ int TagHashAddTag(DetectTagDataEntry *tde, Packet *p)
                 new_tde->next = tag;
                 HostSetStorageById(host, host_tag_id, new_tde);
             }
-        } else if (num_tags == DETECT_TAG_MAX_TAGS) {
-            SCLogDebug("Max tags for sessions reached (%"PRIu16")", num_tags);
+        } else if (ntags == DETECT_TAG_MAX_TAGS) {
+            SCLogDebug("Max tags for sessions reached (%"PRIu16")", ntags);
         }
     }
 
@@ -778,12 +775,12 @@ static int DetectTagTestPacket02 (void)
         SCLogDebug("packet %d flag %s", i, p[i]->flags & PKT_HAS_TAG ? "true" : "false");
 
         /* see if the PKT_HAS_TAG is set on the packet if needed */
-        int expect;
+        bool expect;
         if (i == 0 || i == 2 || i == 3 || i == 5 || i == 6)
-            expect = FALSE;
+            expect = false;
         else
-            expect = TRUE;
-        if (((p[i]->flags & PKT_HAS_TAG) ? TRUE : FALSE) != expect)
+            expect = true;
+        if (((p[i]->flags & PKT_HAS_TAG) ? true : false) != expect)
             goto cleanup;
     }
 
@@ -895,12 +892,12 @@ static int DetectTagTestPacket03 (void)
         SCLogDebug("packet %d flag %s", i, p[i]->flags & PKT_HAS_TAG ? "true" : "false");
 
         /* see if the PKT_HAS_TAG is set on the packet if needed */
-        int expect;
+        bool expect;
         if (i == 0 || i == 3 || i == 5 || i == 6)
-            expect = FALSE;
+            expect = false;
         else
-            expect = TRUE;
-        if (((p[i]->flags & PKT_HAS_TAG) ? TRUE : FALSE) != expect)
+            expect = true;
+        if (((p[i]->flags & PKT_HAS_TAG) ? true : false) != expect)
             goto cleanup;
     }
 
@@ -1030,12 +1027,12 @@ static int DetectTagTestPacket04 (void)
 
         SCLogDebug("packet %d flag %s", i, p[i]->flags & PKT_HAS_TAG ? "true" : "false");
         /* see if the PKT_HAS_TAG is set on the packet if needed */
-        int expect;
+        bool expect;
         if (i == 0 || i == 4 || i == 5 || i == 6)
-            expect = FALSE;
+            expect = false;
         else
-            expect = TRUE;
-        if (((p[i]->flags & PKT_HAS_TAG) ? TRUE : FALSE) != expect)
+            expect = true;
+        if (((p[i]->flags & PKT_HAS_TAG) ? true : false) != expect)
             goto cleanup;
     }
 
@@ -1056,6 +1053,7 @@ cleanup:
     uint8_t proto_map = FlowGetProtoMapping(f->proto);
     FlowClearMemory(f, proto_map);
     FLOW_DESTROY(f);
+    FlowFree(f);
 end:
     FlowShutdown();
     HostShutdown();
@@ -1176,12 +1174,12 @@ static int DetectTagTestPacket05 (void)
 
         SCLogDebug("packet %d flag %s", i, p[i]->flags & PKT_HAS_TAG ? "true" : "false");
         /* see if the PKT_HAS_TAG is set on the packet if needed */
-        int expect;
+        bool expect;
         if (i == 0 || i == 5 || i == 6)
-            expect = FALSE;
+            expect = false;
         else
-            expect = TRUE;
-        if (((p[i]->flags & PKT_HAS_TAG) ? TRUE : FALSE) != expect)
+            expect = true;
+        if (((p[i]->flags & PKT_HAS_TAG) ? true : false) != expect)
             goto cleanup;
     }
 
@@ -1202,6 +1200,7 @@ cleanup:
     uint8_t proto_map = FlowGetProtoMapping(f->proto);
     FlowClearMemory(f, proto_map);
     FLOW_DESTROY(f);
+    FlowFree(f);
 end:
     FlowShutdown();
     HostShutdown();
@@ -1344,6 +1343,7 @@ cleanup:
     uint8_t proto_map = FlowGetProtoMapping(f->proto);
     FlowClearMemory(f, proto_map);
     FLOW_DESTROY(f);
+    FlowFree(f);
 end:
     FlowShutdown();
     HostShutdown();
@@ -1487,6 +1487,7 @@ cleanup:
     uint8_t proto_map = FlowGetProtoMapping(f->proto);
     FlowClearMemory(f, proto_map);
     FLOW_DESTROY(f);
+    FlowFree(f);
 end:
     FlowShutdown();
     HostShutdown();

@@ -24,6 +24,7 @@
  */
 
 #include "suricata-common.h"
+#include "app-layer-ssl.h"
 #include "util-validate.h"
 #include "util-ja3.h"
 
@@ -76,10 +77,6 @@ void Ja3BufferFree(JA3Buffer **buffer)
 static int Ja3BufferResizeIfFull(JA3Buffer *buffer, uint32_t len)
 {
     DEBUG_VALIDATE_BUG_ON(buffer == NULL);
-
-    if (len == 0) {
-        return 0;
-    }
 
     while (buffer->used + len + 2 > buffer->size)
     {
@@ -219,8 +216,6 @@ int Ja3BufferAddValue(JA3Buffer **buffer, uint32_t value)
  */
 char *Ja3GenerateHash(JA3Buffer *buffer)
 {
-
-#ifdef HAVE_NSS
     if (buffer == NULL) {
         SCLogError(SC_ERR_INVALID_ARGUMENT, "Buffer should not be NULL");
         return NULL;
@@ -238,19 +233,9 @@ char *Ja3GenerateHash(JA3Buffer *buffer)
         return NULL;
     }
 
-    unsigned char md5[MD5_LENGTH];
-    HASH_HashBuf(HASH_AlgMD5, md5, (unsigned char *)buffer->data, buffer->used);
-
-    int i, x;
-    for (i = 0, x = 0; x < MD5_LENGTH; x++) {
-        i += snprintf(ja3_hash + i, MD5_STRING_LENGTH - i, "%02x", md5[x]);
-    }
-
+    SCMd5HashBufferToHex((unsigned char *)buffer->data, buffer->used, ja3_hash,
+            MD5_STRING_LENGTH * sizeof(char));
     return ja3_hash;
-#else
-    return NULL;
-#endif /* HAVE_NSS */
-
 }
 
 /**
@@ -265,25 +250,14 @@ char *Ja3GenerateHash(JA3Buffer *buffer)
  */
 int Ja3IsDisabled(const char *type)
 {
-    int is_enabled = 0;
-
-    /* Check if JA3 is enabled */
-    ConfGetBool("app-layer.protocols.tls.ja3-fingerprints", &is_enabled);
-
+    bool is_enabled = SSLJA3IsEnabled();
     if (is_enabled == 0) {
-        SCLogWarning(SC_WARN_JA3_DISABLED, "JA3 is disabled, skipping %s",
-                     type);
+        if (strcmp(type, "rule") != 0) {
+            SCLogWarning(SC_WARN_JA3_DISABLED, "JA3 is disabled, skipping %s",
+                    type);
+        }
         return 1;
     }
-
-#ifndef HAVE_NSS
-    else {
-        SCLogWarning(SC_WARN_NO_JA3_SUPPORT,
-                     "no MD5 calculation support build in, skipping %s",
-                     type);
-        return 1;
-    }
-#endif /* HAVE_NSS */
 
     return 0;
 }

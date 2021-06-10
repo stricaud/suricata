@@ -45,8 +45,15 @@
 
 static Host *HostGetUsedHost(void);
 
+/** host hash table */
+HostHashRow *host_hash;
 /** queue with spare hosts */
 static HostQueue host_spare_q;
+HostConfig host_config;
+
+SC_ATOMIC_DECLARE(uint64_t,host_memuse);
+SC_ATOMIC_DECLARE(uint32_t,host_counter);
+SC_ATOMIC_DECLARE(uint32_t,host_prune_idx);
 
 /** size of the host object. Maybe updated in HostInitConfig to include
  *  the storage APIs additions. */
@@ -125,8 +132,6 @@ void HostFree(Host *h)
 {
     if (h != NULL) {
         HostClearMemory(h);
-
-        SC_ATOMIC_DESTROY(h->use_cnt);
         SCMutexDestroy(&h->m);
         SCFree(h);
         (void) SC_ATOMIC_SUB(host_memuse, g_host_size);
@@ -165,7 +170,7 @@ void HostClearMemory(Host *h)
 
 /** \brief initialize the configuration
  *  \warning Not thread safe */
-void HostInitConfig(char quiet)
+void HostInitConfig(bool quiet)
 {
     SCLogDebug("initializing host engine...");
     if (HostStorageSize() > 0)
@@ -204,7 +209,7 @@ void HostInitConfig(char quiet)
     }
     if ((ConfGetValue("host.hash-size", &conf_val)) == 1)
     {
-        if (ByteExtractStringUint32(&configval, 10, strlen(conf_val),
+        if (StringParseUint32(&configval, 10, strlen(conf_val),
                                     conf_val) > 0) {
             host_config.hash_size = configval;
         }
@@ -212,7 +217,7 @@ void HostInitConfig(char quiet)
 
     if ((ConfGetValue("host.prealloc", &conf_val)) == 1)
     {
-        if (ByteExtractStringUint32(&configval, 10, strlen(conf_val),
+        if (StringParseUint32(&configval, 10, strlen(conf_val),
                                     conf_val) > 0) {
             host_config.prealloc = configval;
         } else {
@@ -236,8 +241,8 @@ void HostInitConfig(char quiet)
     }
     host_hash = SCMallocAligned(host_config.hash_size * sizeof(HostHashRow), CLS);
     if (unlikely(host_hash == NULL)) {
-        SCLogError(SC_ERR_FATAL, "Fatal error encountered in HostInitConfig. Exiting...");
-        exit(EXIT_FAILURE);
+        FatalError(SC_ERR_FATAL,
+                   "Fatal error encountered in HostInitConfig. Exiting...");
     }
     memset(host_hash, 0, host_config.hash_size * sizeof(HostHashRow));
 
@@ -247,7 +252,7 @@ void HostInitConfig(char quiet)
     }
     (void) SC_ATOMIC_ADD(host_memuse, (host_config.hash_size * sizeof(HostHashRow)));
 
-    if (quiet == FALSE) {
+    if (!quiet) {
         SCLogConfig("allocated %"PRIu64" bytes of memory for the host hash... "
                   "%" PRIu32 " buckets of size %" PRIuMAX "",
                   SC_ATOMIC_GET(host_memuse), host_config.hash_size,
@@ -272,7 +277,7 @@ void HostInitConfig(char quiet)
         HostEnqueue(&host_spare_q,h);
     }
 
-    if (quiet == FALSE) {
+    if (!quiet) {
         SCLogConfig("preallocated %" PRIu32 " hosts of size %" PRIu16 "",
                 host_spare_q.len, g_host_size);
         SCLogConfig("host memory usage: %"PRIu64" bytes, maximum: %"PRIu64,
@@ -327,12 +332,6 @@ void HostShutdown(void)
     }
     (void) SC_ATOMIC_SUB(host_memuse, host_config.hash_size * sizeof(HostHashRow));
     HostQueueDestroy(&host_spare_q);
-
-    SC_ATOMIC_DESTROY(host_prune_idx);
-    SC_ATOMIC_DESTROY(host_memuse);
-    SC_ATOMIC_DESTROY(host_counter);
-    SC_ATOMIC_DESTROY(host_config.memcap);
-    //SC_ATOMIC_DESTROY(flow_flags);
     return;
 }
 
@@ -403,14 +402,17 @@ static inline uint32_t HostGetKey(Address *a)
     return key;
 }
 
-/* Since two or more hosts can have the same hash key, we need to compare
- * the flow with the current flow key. */
-#define CMP_HOST(h,a) \
-    (CMP_ADDR(&(h)->a, (a)))
-
 static inline int HostCompare(Host *h, Address *a)
 {
-    return CMP_HOST(h, a);
+    if (h->a.family == a->family) {
+        switch (a->family) {
+            case AF_INET:
+                return (h->a.addr_data32[0] == a->addr_data32[0]);
+            case AF_INET6:
+                return CMP_ADDR(&h->a, a);
+        }
+    }
+    return 0;
 }
 
 /**

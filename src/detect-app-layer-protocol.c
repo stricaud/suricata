@@ -33,9 +33,11 @@
 #include "util-unittest.h"
 #include "util-unittest-helper.h"
 
+#ifdef UNITTESTS
 static void DetectAppLayerProtocolRegisterTests(void);
+#endif
 
-static int DetectAppLayerProtocolPacketMatch(ThreadVars *tv,
+static int DetectAppLayerProtocolPacketMatch(
         DetectEngineThreadCtx *det_ctx,
         Packet *p, const Signature *s, const SigMatchCtx *ctx)
 {
@@ -111,21 +113,21 @@ static DetectAppLayerProtocolData *DetectAppLayerProtocolParse(const char *arg, 
     return data;
 }
 
-static _Bool HasConflicts(const DetectAppLayerProtocolData *us,
+static bool HasConflicts(const DetectAppLayerProtocolData *us,
                           const DetectAppLayerProtocolData *them)
 {
     /* mixing negated and non negated is illegal */
     if (them->negated ^ us->negated)
-        return TRUE;
+        return true;
     /* multiple non-negated is illegal */
     if (!us->negated)
-        return TRUE;
+        return true;
     /* duplicate option */
     if (us->alproto == them->alproto)
-        return TRUE;
+        return true;
 
     /* all good */
-    return FALSE;
+    return false;
 }
 
 static int DetectAppLayerProtocolSetup(DetectEngineCtx *de_ctx,
@@ -176,7 +178,7 @@ error:
     return -1;
 }
 
-static void DetectAppLayerProtocolFree(void *ptr)
+static void DetectAppLayerProtocolFree(DetectEngineCtx *de_ctx, void *ptr)
 {
     SCFree(ptr);
     return;
@@ -190,7 +192,7 @@ PrefilterPacketAppProtoMatch(DetectEngineThreadCtx *det_ctx, Packet *p, const vo
 {
     const PrefilterPacketHeaderCtx *ctx = pectx;
 
-    if (PrefilterPacketHeaderExtraMatch(ctx, p) == FALSE) {
+    if (!PrefilterPacketHeaderExtraMatch(ctx, p)) {
         SCLogDebug("packet %"PRIu64": extra match failed", p->pcap_cnt);
         SCReturn;
     }
@@ -228,14 +230,14 @@ PrefilterPacketAppProtoSet(PrefilterPacketHeaderValue *v, void *smctx)
     v->u8[2] = (uint8_t)a->negated;
 }
 
-static _Bool
+static bool
 PrefilterPacketAppProtoCompare(PrefilterPacketHeaderValue v, void *smctx)
 {
     const DetectAppLayerProtocolData *a = smctx;
     if (v.u16[0] == a->alproto &&
         v.u8[2] == (uint8_t)a->negated)
-        return TRUE;
-    return FALSE;
+        return true;
+    return false;
 }
 
 static int PrefilterSetupAppProto(DetectEngineCtx *de_ctx, SigGroupHead *sgh)
@@ -246,26 +248,30 @@ static int PrefilterSetupAppProto(DetectEngineCtx *de_ctx, SigGroupHead *sgh)
         PrefilterPacketAppProtoMatch);
 }
 
-static _Bool PrefilterAppProtoIsPrefilterable(const Signature *s)
+static bool PrefilterAppProtoIsPrefilterable(const Signature *s)
 {
     if (s->flags & SIG_FLAG_PDONLY) {
         SCLogDebug("prefilter on PD %u", s->id);
-        return TRUE;
+        return true;
     }
-    return FALSE;
+    return false;
 }
 
 void DetectAppLayerProtocolRegister(void)
 {
     sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].name = "app-layer-protocol";
+    sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].desc = "match on the detected app-layer protocol";
+    sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].url = "/rules/app-layer.html#app-layer-protocol";
     sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].Match =
         DetectAppLayerProtocolPacketMatch;
     sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].Setup =
         DetectAppLayerProtocolSetup;
     sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].Free =
         DetectAppLayerProtocolFree;
+#ifdef UNITTESTS
     sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].RegisterTests =
         DetectAppLayerProtocolRegisterTests;
+#endif
     sigmatch_table[DETECT_AL_APP_LAYER_PROTOCOL].flags =
         (SIGMATCH_QUOTES_OPTIONAL|SIGMATCH_HANDLE_NEGATION);
 
@@ -286,7 +292,7 @@ static int DetectAppLayerProtocolTest01(void)
     FAIL_IF_NULL(data);
     FAIL_IF(data->alproto != ALPROTO_HTTP);
     FAIL_IF(data->negated != 0);
-    DetectAppLayerProtocolFree(data);
+    DetectAppLayerProtocolFree(NULL, data);
     PASS;
 }
 
@@ -296,7 +302,7 @@ static int DetectAppLayerProtocolTest02(void)
     FAIL_IF_NULL(data);
     FAIL_IF(data->alproto != ALPROTO_HTTP);
     FAIL_IF(data->negated == 0);
-    DetectAppLayerProtocolFree(data);
+    DetectAppLayerProtocolFree(NULL, data);
     PASS;
 }
 
@@ -457,7 +463,7 @@ static int DetectAppLayerProtocolTest11(void)
     FAIL_IF_NULL(data);
     FAIL_IF(data->alproto != ALPROTO_FAILED);
     FAIL_IF(data->negated != 0);
-    DetectAppLayerProtocolFree(data);
+    DetectAppLayerProtocolFree(NULL, data);
     PASS;
 }
 
@@ -467,7 +473,7 @@ static int DetectAppLayerProtocolTest12(void)
     FAIL_IF_NULL(data);
     FAIL_IF(data->alproto != ALPROTO_FAILED);
     FAIL_IF(data->negated == 0);
-    DetectAppLayerProtocolFree(data);
+    DetectAppLayerProtocolFree(NULL, data);
     PASS;
 }
 
@@ -542,11 +548,9 @@ static int DetectAppLayerProtocolTest14(void)
     PASS;
 }
 
-#endif /* UNITTESTS */
 
 static void DetectAppLayerProtocolRegisterTests(void)
 {
-#ifdef UNITTESTS /* UNITTESTS */
     UtRegisterTest("DetectAppLayerProtocolTest01",
                    DetectAppLayerProtocolTest01);
     UtRegisterTest("DetectAppLayerProtocolTest02",
@@ -575,7 +579,5 @@ static void DetectAppLayerProtocolRegisterTests(void)
                    DetectAppLayerProtocolTest13);
     UtRegisterTest("DetectAppLayerProtocolTest14",
                    DetectAppLayerProtocolTest14);
-#endif /* UNITTESTS */
-
-    return;
 }
+#endif /* UNITTESTS */

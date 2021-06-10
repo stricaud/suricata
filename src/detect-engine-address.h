@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2010 Open Information Security Foundation
+/* Copyright (C) 2007-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -24,34 +24,18 @@
 #ifndef __DETECT_ADDRESS_H__
 #define __DETECT_ADDRESS_H__
 
-/* prototypes */
-void DetectAddressRegister (void);
 
-DetectAddressHead *DetectAddressHeadInit(void);
-void DetectAddressHeadFree(DetectAddressHead *);
-void DetectAddressHeadCleanup(DetectAddressHead *);
-
-int DetectAddressParseString(DetectAddress *, const char *);
-int DetectAddressParse(const DetectEngineCtx *, DetectAddressHead *, const char *);
 
 DetectAddress *DetectAddressInit(void);
 void DetectAddressFree(DetectAddress *);
-
-void DetectAddressCleanupList (DetectAddress *);
-int DetectAddressAdd(DetectAddress **, DetectAddress *);
-void DetectAddressPrintList(DetectAddress *);
-
-int DetectAddressInsert(DetectEngineCtx *, DetectAddressHead *, DetectAddress *);
-int DetectAddressJoin(DetectEngineCtx *, DetectAddress *, DetectAddress *);
+DetectAddress *DetectAddressCopy(DetectAddress *);
+int DetectAddressParse(const DetectEngineCtx *, DetectAddressHead *, const char *);
+void DetectAddressHeadCleanup(DetectAddressHead *);
 
 bool DetectAddressListsAreEqual(DetectAddress *list1, DetectAddress *list2);
 
 DetectAddress *DetectAddressLookupInHead(const DetectAddressHead *, Address *);
-DetectAddress *DetectAddressLookupInList(DetectAddress *, DetectAddress *);
-int DetectAddressMatch(DetectAddress *, Address *);
 
-DetectAddress *DetectAddressCopy(DetectAddress *);
-void DetectAddressPrint(DetectAddress *);
 int DetectAddressCmp(DetectAddress *, DetectAddress *);
 
 int DetectAddressMatchIPv4(const DetectMatchAddressIPv4 *, uint16_t, const Address *);
@@ -64,6 +48,10 @@ void DetectAddressTests(void);
 int DetectAddressMapInit(DetectEngineCtx *de_ctx);
 void DetectAddressMapFree(DetectEngineCtx *de_ctx);
 const DetectAddressHead *DetectParseAddress(DetectEngineCtx *de_ctx,
-        const char *string);
+        const char *string, bool *contains_negation);
+
+#ifdef DEBUG
+void DetectAddressPrintList(DetectAddress *);
+#endif
 
 #endif /* __DETECT_ADDRESS_H__ */

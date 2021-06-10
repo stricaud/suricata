@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2013 Open Information Security Foundation
+/* Copyright (C) 2007-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -24,13 +24,12 @@
 #ifndef __OUTPUT_JSON_FILE_H__
 #define __OUTPUT_JSON_FILE_H__
 
-void JsonFileLogRegister(void);
-
-#ifdef HAVE_LIBJANSSON
 #include "app-layer-htp-xff.h"
 
-json_t *JsonBuildFileInfoRecord(const Packet *p, const File *ff,
-        const bool stored, uint8_t dir, HttpXFFCfg *xff_cfg);
-#endif
+typedef struct OutputJsonCtx_ OutputJsonCtx;
+
+void JsonFileLogRegister(void);
+JsonBuilder *JsonBuildFileInfoRecord(const Packet *p, const File *ff, const bool stored,
+        uint8_t dir, HttpXFFCfg *xff_cfg, OutputJsonCtx *eve_ctx);
 
 #endif /* __OUTPUT_JSON_FILE_H__ */
